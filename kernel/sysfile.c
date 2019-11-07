@@ -238,20 +238,25 @@ bad:
   return -1;
 }
 
+// 首先根据推测，这个create应该是把设备绑定到文件上，分配一个inode
 static struct inode*
 create(char *path, short type, short major, short minor)
 {
   struct inode *ip, *dp;
   char name[DIRSIZ];
 
+  // 这个nameiparent先不管了，看名字就是找到path最后一级的父目录的directory inode
+  // 例如参数("/etc/fatab", "") -> 返回结果 dp是"/etc/"的inode，name是"fstab"
   if((dp = nameiparent(path, name)) == 0)
     return 0;
 
   ilock(dp);
-
+  // 在目录下找到name的inode
   if((ip = dirlookup(dp, name, 0)) != 0){
+    // dp资源就可以释放了
     iunlockput(dp);
     ilock(ip);
+    // 检查inode pointer的类型，如果是普通文件据可以直接返回了
     if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
       return ip;
     iunlockput(ip);
@@ -376,9 +381,11 @@ sys_mknod(void)
      argint(1, &major) < 0 ||
      argint(2, &minor) < 0 ||
      (ip = create(path, T_DEVICE, major, minor)) == 0){
+    // 按照user/init.c中的参数，上面create的参数是("console", 3, 1, 1);
     end_op(ROOTDEV);
     return -1;
   }
+  // 上面解析参数，得到path，major，minor这俩号码应该是设备驱动相关的，用来找到设备用的
   iunlockput(ip);
   end_op(ROOTDEV);
   return 0;
@@ -409,6 +416,7 @@ sys_chdir(void)
   return 0;
 }
 
+// 系统第一个syscall
 uint64
 sys_exec(void)
 {
@@ -416,29 +424,46 @@ sys_exec(void)
   int i;
   uint64 uargv, uarg;
 
+  // 解析syscall的参数，第一个参数是字符串，第二个参数是个字符串数组
+  // 回忆一下exec这个syscall的参数，第一个是文件系统中ELF文件的路径
+  // 第二个参数是字符串数组，其中第一个字符串就是ELF的路径，后面的字符串是这个ELF可执行文件的参数
+  
+  // 根据user/initcode.S处设置的参数，path是"/init\0"， uargv是字符串数组{"/init\0", 0}
+  // 因此argstr直接根据第0个参数的地址，然后去页表里面读到了整个字符串
+  // uargv是字符串数组的首地址，注意不是0
   if(argstr(0, path, MAXPATH) < 0 || argaddr(1, &uargv) < 0){
     return -1;
   }
   memset(argv, 0, sizeof(argv));
+  // 下面就是根据uargv解析出argv
   for(i=0;; i++){
     if(i >= NELEM(argv)){
       goto bad;
     }
+    // uargv是字符串数组，里面每一项是一个字符串地址，根据这个地址再fetchstr得到字符串
+    // 下面的uarg就是每一项字符串的地址
     if(fetchaddr(uargv+sizeof(uint64)*i, (uint64*)&uarg) < 0){
       goto bad;
     }
+    // 最后一项直接break
     if(uarg == 0){
       argv[i] = 0;
       break;
     }
+    // 为字符串数组每一项分配空间
     argv[i] = kalloc();
     if(argv[i] == 0)
       panic("sys_exec kalloc");
+    // 根据这个地址继续fetchstr，得到字符串，装入argv的第i项
     if(fetchstr(uarg, argv[i], PGSIZE) < 0){
       goto bad;
     }
   }
 
+  // 上面的for循环看着很复杂， 其实就是把user proc address space的字符串数组复制到内核
+  // 到这儿argv已经准备好了，下面就是调用exec替换进程
+
+  // 我们继续到exec中查看，不出意外就是加载文件系统的/init这个ELF文件到内存，然后设置好相应的进程空间
   int ret = exec(path, argv);
 
   for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)

@@ -18,6 +18,7 @@ struct run {
   struct run *next;
 };
 
+// 整个系统管理的物理内存
 struct {
   struct spinlock lock;
   struct run *freelist;
@@ -27,6 +28,9 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  // 初始化[end, PHYSTOP]之间的物理内存
+  // 根据kernel.ld中的指示，end是kernel之后的第一个地址
+  // 注意end是链接脚本中导出的符号，
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -34,6 +38,8 @@ void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
+  // 对[pa_start, pa_end]中间的所有页面，调用kfree()初始化页面
+  // 地址p是对PGSIZE对齐的
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
@@ -54,9 +60,11 @@ kfree(void *pa)
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
+  // 把这个4KB的页面类型转换为sturct run*
   r = (struct run*)pa;
 
   acquire(&kmem.lock);
+  // 然后插入到空闲链表的头部
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);

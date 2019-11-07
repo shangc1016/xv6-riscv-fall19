@@ -21,16 +21,19 @@ fetchaddr(uint64 addr, uint64 *ip)
 
 // Fetch the nul-terminated string at addr from the current process.
 // Returns length of string, not including nul, or -1 for error.
+// 从用户进程地址空间的addr地址拷贝字符串
 int
 fetchstr(uint64 addr, char *buf, int max)
 {
   struct proc *p = myproc();
+  // 从进程p地址空间的addr位置拷贝字符串到buf
   int err = copyinstr(p->pagetable, buf, addr, max);
   if(err < 0)
     return err;
   return strlen(buf);
 }
 
+// 根据参数n，返回参数列表的第几个参数
 static uint64
 argraw(int n)
 {
@@ -64,6 +67,7 @@ argint(int n, int *ip)
 // Retrieve an argument as a pointer.
 // Doesn't check for legality, since
 // copyin/copyout will do that.
+// 从a[x]这个寄存器上读一个地址，类型是uint64
 int
 argaddr(int n, uint64 *ip)
 {
@@ -78,8 +82,10 @@ int
 argstr(int n, char *buf, int max)
 {
   uint64 addr;
+  // 先读到string的地址
   if(argaddr(n, &addr) < 0)
     return -1;
+  // 然后去拷贝字符串，注意addr这个地址是用户进程空间的地址
   return fetchstr(addr, buf, max);
 }
 
@@ -131,14 +137,20 @@ static uint64 (*syscalls[])(void) = {
 [SYS_ntas]    sys_ntas,
 };
 
+// 所有syscall的处理入口
 void
 syscall(void)
 {
   int num;
+  // 根据mycpu拿到myproc
   struct proc *p = myproc();
 
+  // a7寄存器默认存放syscall number
   num = p->tf->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+    // 根据syscall number调用相应的handler，把返回值放到a0；
+    // 在这儿我们仍然以第一个用户进程initcode为例子，参照user/initcode.S，此处num就是SYS_exec
+    // 查看上面的syscall数组，继续分析sys_exec函数
     p->tf->a0 = syscalls[num]();
   } else {
     printf("%d %s: unknown sys call %d\n",

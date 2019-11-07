@@ -29,16 +29,23 @@ procinit(void)
   struct proc *p;
   
   initlock(&pid_lock, "nextpid");
+  // 遍历整个proc数组
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
 
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
+      // 分配一个页面
       char *pa = kalloc();
       if(pa == 0)
         panic("kalloc");
+      // 每个进程的内核栈放在进程页表的固定位置，也就是trampoline下面的第二个页面
+      // 因为中间有一个空闲页面作为分割
       uint64 va = KSTACK((int) (p - proc));
+      // 映射每个进程的栈
+      // TODO: 有个问题，为啥要在procinit的时候，为每个进程alloc内核栈空间呢？
+      // 而且每个进程的内核栈映射到的进程空间地址不同？
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
   }
@@ -108,19 +115,25 @@ allocproc(void)
 found:
   p->pid = allocpid();
 
+  // NOTE: 注意区分，下面的内容是在内核状态下，进程创建出来之后必要的ra，sp等状态
+
   // Allocate a trapframe page.
+  // 分配一个页面作为trapframe使用，也就是syscall陷入内核的上下文放在这儿
   if((p->tf = (struct trapframe *)kalloc()) == 0){
     release(&p->lock);
     return 0;
   }
 
   // An empty user page table.
+  // 初始化进程的页表，映射一些固定的内容，trampoline以及trapframe到固定位置
   p->pagetable = proc_pagetable(p);
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof p->context);
+  // 设置好每个进程的ra返回地址，以及sp；在ret之后ra->pc，跳回到ra处执行
   p->context.ra = (uint64)forkret;
+  // 进程的栈指针指向内核栈空间的对应位置
   p->context.sp = p->kstack + PGSIZE;
 
   return p;
@@ -156,12 +169,15 @@ proc_pagetable(struct proc *p)
   pagetable_t pagetable;
 
   // An empty page table.
+  // alloc分配一个页表
   pagetable = uvmcreate();
 
   // map the trampoline code (for system call return)
   // at the highest user virtual address.
   // only the supervisor uses it, on the way
   // to/from user space, so not PTE_U.
+  // 分别把trampoline以及trapframe映射到对应位置
+  // [   ...    ][trapframe][trampoline] 这两个页面分别在进程地址空间最后的位置
   mappages(pagetable, TRAMPOLINE, PGSIZE,
            (uint64)trampoline, PTE_R | PTE_X);
 
@@ -201,21 +217,30 @@ userinit(void)
 {
   struct proc *p;
 
+  // 从全局的proc数组中找到一个空闲的进程
   p = allocproc();
   initproc = p;
   
   // allocate one user page and copy init's instructions
   // and data into it.
+  // 首先看，initcode是用户进程的代码块，为了构造这个进程，首先需要申请一块内存，映射到虚拟地址0的位置
+  // 然后把initcode拷贝到这块内存上去，因为进程地址空间构造代码块在起始地址.
   uvminit(p->pagetable, initcode, sizeof(initcode));
+  // 这个sz就是进程页表里面影射了物理页面的大小
   p->sz = PGSIZE;
 
+  // NOTE：注意下面的内容是initcode这个系统中第一个进程进入用户态而必须的一些设置，epc等等
+
   // prepare for the very first "return" from kernel to user.
+  // 当p这个进程被调度到的时候，cpu会将epc恢复到pc，epc->pc，然后执行
+  // 也就是pc最终会指向进程地址空间的0地址执行，也就是上面构造的initcode代码区
   p->tf->epc = 0;      // user program counter
+  // FIXME: 这儿设置p->tf->sp = PGSIZE是什么意思？
   p->tf->sp = PGSIZE;  // user stack pointer
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
-
+  // 设置进程状态为RUNNABLE，即可以被调度执行的
   p->state = RUNNABLE;
 
   release(&p->lock);
@@ -441,6 +466,7 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// scheduler是每个hart都会执行的
 void
 scheduler(void)
 {
@@ -457,6 +483,11 @@ scheduler(void)
     // cause a lost wakeup.
     intr_off();
 
+    // 在qemu中配置的N个hart最终都会在这儿死循环 
+    // 因为上面在main()中已经通过userinit设置过系统第一个进程
+    // 因此scheduler调度器选择的第一个进程也就是initcode这个进程
+    // 
+
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
@@ -464,8 +495,14 @@ scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        // 更新选中执行的进程的状态，从RUNNABLE->RUNNING
         p->state = RUNNING;
+        // 然后把维护当前hart执行的proc是哪个
         c->proc = p;
+        // 最后直接swtch到选中的进程执行，整个过程仍然都是在supervisor的内核状态下完成
+        // 还是以initcode第一个进程为例子，在allocproc中设置了p->context.ra/sp
+        // 其中ra=forkret，在swtch中把当前hart的ctx保存到c->scheduler
+        // 然后把p->context恢复到hart上，最后调用ret(ra->pc)，也就是在内核中跳转到forkret执行
         swtch(&c->scheduler, &p->context);
 
         // Process is done running for now.
@@ -531,6 +568,8 @@ void
 forkret(void)
 {
   static int first = 1;
+  // 
+  // 以系统第一个进程为例，调用fsinit之后调用usertrapret，我们直接去看usertrapret
 
   // Still holding p->lock from scheduler.
   release(&myproc()->lock);

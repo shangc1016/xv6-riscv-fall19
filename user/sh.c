@@ -54,6 +54,7 @@ void panic(char*);
 struct cmd *parsecmd(char*);
 
 // Execute cmd.  Never returns.
+__attribute__((noreturn))
 void
 runcmd(struct cmd *cmd)
 {
@@ -141,6 +142,7 @@ getcmd(char *buf, int nbuf)
   return 0;
 }
 
+// 这就是user/init.c中fork出来的子进程exec到sh的函数执行入口
 int
 main(void)
 {
@@ -148,14 +150,17 @@ main(void)
   int fd;
 
   // Ensure that three file descriptors are open.
+  // 注意第一次执行while的时候，当前进程没有打开的文件，所以在循环中fd依次是0，1，2，然后3的时候被close
   while((fd = open("console", O_RDWR)) >= 0){
     if(fd >= 3){
       close(fd);
       break;
     }
   }
+  // fd=0，1，2分别是standard read，write，error
 
   // Read and run input commands.
+  // getcmd阻塞等待读入命令
   while(getcmd(buf, sizeof(buf)) >= 0){
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
       // Chdir must be called by the parent, not the child.
@@ -164,6 +169,7 @@ main(void)
         fprintf(2, "cannot cd %s\n", buf+3);
       continue;
     }
+    // 然后fork出子进程执行命令，到这儿整个系统就启动完成了
     if(fork1() == 0)
       runcmd(parsecmd(buf));
     wait(0);

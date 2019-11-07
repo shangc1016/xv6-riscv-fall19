@@ -22,35 +22,58 @@ void print(pagetable_t);
  * turn on paging. called early, in supervisor mode.
  * the page allocator is already initialized.
  */
+
+// 准备分页了，首先给内核准备好页表，内核需要管理的只有这些串口设备，CLINT，PLIC等中断设备
+// 直接在页表中映射到和物理地址相同的虚拟地址，直接映射
 void
 kvminit()
 {
+  // 申请一页作为内核页表
   kernel_pagetable = (pagetable_t) kalloc();
+  // 初始化内核页表
   memset(kernel_pagetable, 0, PGSIZE);
 
+  // 注意kvmmap调用mappages，映射的最小单位是一页
+  // 注意下面映射的都是外设，所以权限都是PTE_W | PTWE_R 可读可写
+
   // uart registers
+  // 0x10000000L
   kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
   // virtio mmio disk interface 0
+  // 0x10001000L
   kvmmap(VIRTION(0), VIRTION(0), PGSIZE, PTE_R | PTE_W);
 
   // virtio mmio disk interface 1
+  // 0x10002000L
   kvmmap(VIRTION(1), VIRTION(1), PGSIZE, PTE_R | PTE_W);
 
   // CLINT
+  // 0x2000000L
   kvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
   // PLIC
+  // 0x0c000000L
   kvmmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W);
 
   // map kernel text executable and read-only.
+  // 这儿的KERNBASE就是整个系统映射的初始地址，也就是qemu默认入口地址，0x8000-0000L
+  // etext是在链接脚本中导出的符号，位于text段之后，data段之前
+  // [text section] [data section] [free memory]
+  // |             |              |            |
+  // KERNBASE      etext          end          PHYSTOP
+  // 0x8000-0000L                               KERNBASE+128MB, 0x8800-0000L
+  // 由此可知，代码段大小etext - KERNBASE，代码段权限是可读，可执行的，不能写；
   kvmmap(KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
 
   // map kernel data and the physical RAM we'll make use of.
+  // 和上面一样，此处映射的是[etext, PHYSTOP]这段区域，这段属于数据区，可读可写，不能执行
   kvmmap((uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
 
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
+  // TRAMPOLINE是虚拟地址的最后一个页面，这个页面将会被映射到所有进程的相同地址
+  // 这块区域用来实现syscall的跳转，是一段保存上下文的代码，权限是可读可执行
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
 
@@ -59,7 +82,11 @@ kvminit()
 void
 kvminithart()
 {
+  // 把内核页表的基地址写入satp寄存器，这个寄存器保存页表基址
+  // 写入的是内核的页表，
   w_satp(MAKE_SATP(kernel_pagetable));
+  // 刷新TLB缓存，到这之前TLB表应该还未使用
+  // TLB是页表的缓存
   sfence_vma();
 }
 

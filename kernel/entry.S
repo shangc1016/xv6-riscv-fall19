@@ -9,6 +9,9 @@
 .globl start
 .section .text
 .globl _entry
+# 从kernel.ld连接脚本可以看到，整个系统的入口就是_entry
+# 这个片段就是设置好每个hart的sp，然后跳转到start函数处
+# 每个hart的栈空间大小为4KB，所有的栈已经定义在start.c中
 _entry:
 	# set up a stack for C.
         # stack0 is declared in start.c,

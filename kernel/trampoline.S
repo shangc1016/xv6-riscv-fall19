@@ -64,6 +64,8 @@ uservec:
         csrr t0, sscratch
         sd t0, 112(a0)
 
+        # 关于用户进程在内核态的一些信息在usertrapret中设置
+
         # restore kernel stack pointer from p->tf->kernel_sp
         ld sp, 8(a0)
 
@@ -74,6 +76,7 @@ uservec:
         ld t0, 16(a0)
 
         # restore kernel page table from p->tf->kernel_satp
+        # 在这儿恢复系统的页表为内核页表
         ld t1, 0(a0)
         csrw satp, t1
         sfence.vma zero, zero
@@ -82,6 +85,7 @@ uservec:
         # table does not specially map p->tf.
 
         # jump to usertrap(), which does not return
+        # 最后跳转到usertrap
         jr t0
 
 .globl userret
@@ -93,7 +97,9 @@ userret:
         # a1: user page table, for satp.
 
         # switch to the user page table.
+        # 首先设置用户进程页表基地址
         csrw satp, a1
+        # 然后刷新TLB缓存
         sfence.vma zero, zero
 
         # put the saved user a0 in sscratch, so we
@@ -138,4 +144,6 @@ userret:
         
         # return to user mode and user pc.
         # usertrapret() set up sstatus and sepc.
+        # 最后调用sret，从epc中返回，epc->pc... 还有spp等状态的恢复
+        # 第一个用户进程是initcode，所以我们接下来去user/initcode.S中查看
         sret

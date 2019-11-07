@@ -31,7 +31,10 @@ struct {
   // head.next is most recently used.
   struct buf head;
 } bcache;
+// block cache.
 
+
+// bcache的数据在buf.data中保存，在这儿我们初始化bcache双向链表这个数据结构
 void
 binit(void)
 {
