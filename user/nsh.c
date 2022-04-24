@@ -1,173 +1,152 @@
 #include"user/user.h"
 #include"kernel/fcntl.h"
+#include"kernel/param.h"
 
-#define MAX_ARGS 32
-#define MAX_ARGS_LEN 32
+#define MAX_LEN 1024
 
-char cmdline[MAX_ARGS * MAX_ARGS_LEN] = {0};
-char *cmd[MAX_ARGS] = {0};
-char *p;
+#define ARG_SZ 128
 
-int sz;
-int count;
-int cmd_len;
+char line[MAX_LEN];
+char command[ARG_SZ][MAXARG];
+char *cmd[MAXARG]; // MAXARG 是exec最大参数个数
 
 
-
-void replace(char *str, int sz, char target, char replace){
+void replace(char *str, int sz, char _old, char _new){
     char *p = str;
-    for(int i=0; i< sz; i++){
-        if(*p == target){
-            *p = replace; 
-        }
+    for(int i=0; i<sz; i++){
+        if(*p && *p == _old) *p = _new;
         p++;
     }
 }
 
-
-int substr(char *target[],int sz, char *match){
-    for(int i=0; i<sz; i++){
-        if(!strcmp(target[i], match)){
-            return i;
-        }
+int substr(char *argv[], int argc, char *str){
+    for(int i = 0; i < argc; i++){
+        if(!strcmp(argv[i], str)) return i;
     }
     return -1;
 }
 
-
-
-void redirection(int argc, char *argv[]){
-    // for(int i=0; i<argc; i++){
-    //     fprintf(2, ">>%s\n", argv[i]);
-    // }
-   
+void execute_redirection(int argc, char **argv){
     int in = substr(argv, argc, "<");
     int out = substr(argv, argc, ">");
-    int in_fd = -1, out_fd = -1;
-    char *in_fname, *out_fname;
-    if(in >= 0){
-        // 有输入重定向
-        in_fname = argv[in + 1];
-        argv[in] = 0;
-    }
-    if(out >= 0){
-        // 有输入重定向
-        out_fname = argv[out + 1];
-        argv[out] = 0;
-    }
+    char *iname, *oname;
+    int ifd = -1, ofd = -1;
     int pid = fork();
     if(pid == 0){
-        if(in >= 0){
-            // fprintf(2, "in\n");
+        if(in > -1){
+            iname = argv[in + 1];
+            argv[in] = 0;
             close(0);
-            in_fd = open(in_fname, O_RDONLY);
-            if(in_fd == -1){
+            ifd = open(iname, O_RDONLY);
+            if(ifd == -1){
                 fprintf(2, "open error\n");
                 exit(-1);
             }
         }
-        if(out >= 0){
-            // fprintf(2, "out\n");
+        if(out > -1){
+            oname = argv[out + 1];
+            argv[out] = 0;
             close(1);
-            out_fd = open(out_fname, O_CREATE | O_WRONLY);
-            if(out_fd== -1){
+            ofd = open(oname, O_CREATE | O_WRONLY);
+            if(ofd == -1){
                 fprintf(2, "open error\n");
                 exit(-1);
             }
         }
         exec(argv[0], argv);
+        fprintf(2, "exec error\n");
     }
     if(pid < 0){
         fprintf(2, "fork error\n");
         exit(-1);
     }
     if(pid > 0){
-        wait(&pid);
-        if(in_fd >= 0) close(in_fd);
-        if(out_fd >= 0) close(out_fd);
+        wait(0);
     }
 }
 
-void execute(int argc, char *argv[]){
-   
+
+void execute_pipe(int argc, char **argv){
     int pipe_pos = substr(argv, argc, "|");
     if(pipe_pos == -1){
-        redirection(argc, argv);
-    } else{
-        // 有管道，这个直接骗测试了
+        execute_redirection(argc, argv);
+    }else if(pipe_pos > 0){
+        // 有管道
         argv[pipe_pos] = 0;
-        int data[2];
-        if(pipe(data) == -1){
-            fprintf(2, "pipe errorpn");
+        int fd[2];
+        // 创建管道
+        if(pipe(fd) == -1){
+            fprintf(2, "pipe error\n");
             exit(-1);
         }
-        int pid = fork();
-        if(pid == 0){
+        // fork两个进程，分别去执行管道两端的命令
+        int first = fork();
+        if(first == 0){
             close(1);
-            dup(data[1]);
-            redirection(pipe_pos, argv);
+            dup(fd[1]);
+            execute_redirection(pipe_pos, argv);
+            close(fd[1]);
         }
-        if(pid > 0){
-            int pid2 = fork();
-            if(pid2 == 0){
+        if(first < 0){
+            fprintf(2, "fork error\n");
+            exit(-1);
+        }
+        if(first > 0){
+            int second = fork();
+            if(second == 0){
                 close(0);
-                dup(data[0]);
-                redirection(argc - pipe_pos -1, argv + pipe_pos + 1);
+                dup(fd[0]);
+                execute_redirection(argc - pipe_pos, argv + pipe_pos + 1);
+                close(fd[0]);
+            }
+            if(second < 0){
+                fprintf(2, "fork error\n");
+                exit(-1);
+            }
+            if(second > 0){
+                // wait(&first);
+                wait(0);
+               
             }
         }
     }
 }
 
 
+void strncpy(char *dest, char *src, int sz){
+    for(int i=0; i<sz; i++){
+        dest[i] = src[i];
+        i++;
+    }
+}
 
 int main(int argc, char *argv[]){
+    printf("@ ");
+    memset(command, 0, sizeof(char) * ARG_SZ * MAXARG);
+    int len=0, i=0;
+    int sz;
     while(1){
-        printf("@ ");
-        for(int i=0; i<MAX_ARGS * MAX_ARGS_LEN; i++) cmdline[i] = 0;
-        p = cmdline;
-        while(1){
-            sz = read(0, p, 1);
-            if(sz < 0){
-                fprintf(2, "error\n");
-                exit(-1);
-            }
-            if(sz == 0 || *p == '\n') break;
-            p++;
-            if(p - cmdline > MAX_ARGS * MAX_ARGS_LEN) {
-                fprintf(2, "args too long\n");
-                exit(-1);
-            }
+        sz = read(0, &command[len][i], 1);
+        if(command[len][i] == '\n') {
+            command[len][i] = 0;
+            len++;
+            i = 0;
+            continue;
         }
-        if(sz == 0) break;   //  这他妈是啥？？？？
-
-        count = p - cmdline + 1;
-
-        if(!strcmp(cmdline, "q\n")) break;
-
-        replace(cmdline, count, ' ', '\0');
-        replace(cmdline, count, '\n', '\0');
-
-        p = cmdline;
-
-        int cmd_len = 0;
-        cmd[cmd_len++] = p;
-        for(int i=0; i< count -1; i++){
-            if(*p == '\0' && *(p+1) != '\0'){
-                if(cmd_len+1 > MAX_ARGS_LEN) {
-                    fprintf(2, "args too long\n");
-                    exit(-1);
-                }
-                cmd[cmd_len++] = p+1;
-            }
+        if(sz == 0) break;
+        i++;
+    }
+    for(int i = 0; i<len; i++){
+        sz = strlen(command[i]);
+        replace(command[i], sz, ' ', 0);
+        char *p = command[i];
+        int len = 0;
+        cmd[len++] = p;
+        for(int i = 0; i < sz; i++){
+            if(*p == 0 && *(p+1) != 0) cmd[len++] = p+1;
             p++;
         }
-        // if(cmd_len == 0) break;;
-
-        // for(int i=0; i<cmd_len; i++)
-        //     fprintf(2, "::%s\n", cmd[i]);
-        execute(cmd_len, cmd);
-        for(int i = 0; i < cmd_len; i++) cmd[i] = 0;
+        execute_pipe(len, cmd);
     }
     exit(0);
 }
-

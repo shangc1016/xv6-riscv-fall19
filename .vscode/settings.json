@@ -4,6 +4,9 @@
         "stat.h": "c",
         "user.h": "c",
         "fs.h": "c",
-        "fcntl.h": "c"
+        "fcntl.h": "c",
+        "*.tcc": "c",
+        "fstream": "c",
+        "param.h": "c"
     }
 }
