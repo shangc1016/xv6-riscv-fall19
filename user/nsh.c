@@ -29,29 +29,46 @@ void execute_redirection(int argc, char **argv) {
   int out = substr(argv, argc, ">");
   char *iname, *oname;
   int ifd = -1, ofd = -1;
+  if(in > -1){
+    // 有输入重定向
+    iname = argv[in + 1];
+    argv[in] = 0;
+    ifd = open(iname, O_RDONLY);
+  }
+  if(out > -1){
+    oname = argv[out + 1];
+    argv[out] = 0;
+    ofd = open(oname, O_CREATE | O_WRONLY);
+  }
   int pid = fork();
   if (pid == 0) {
     if (in > -1) {
-      iname = argv[in + 1];
-      argv[in] = 0;
       close(0);
-      ifd = open(iname, O_RDONLY);
-      if (ifd == -1) {
-        fprintf(2, "open error\n");
-        exit(-1);
-      }
+      dup(ifd);
+      // iname = argv[in + 1];
+      // argv[in] = 0;
+      // close(0);
+      // ifd = open(iname, O_RDONLY);
+      // if (ifd == -1) {
+      //   fprintf(2, "open error\n");
+      //   exit(-1);
+      // }
     }
     if (out > -1) {
-      oname = argv[out + 1];
-      argv[out] = 0;
       close(1);
-      ofd = open(oname, O_CREATE | O_WRONLY);
-      if (ofd == -1) {
-        fprintf(2, "open error\n");
-        exit(-1);
-      }
+      dup(ofd);
+      // oname = argv[out + 1];
+      // argv[out] = 0;
+      // close(1);
+      // ofd = open(oname, O_CREATE | O_WRONLY);
+      // if (ofd == -1) {
+      //   fprintf(2, "open error\n");
+      //   exit(-1);
+      // }
     }
-    // for (int i = 0; i < argc; i++) fprintf(2, "argv:%s\n", argv[i]);
+    // fprintf(2, "\n===pid:%d", getpid());
+    // for (int i = 0; i < argc; i++) fprintf(2, "\nargv[%d]:%s", i, argv[i]);
+    // fprintf(2, "\n");
     exec(argv[0], argv);
     fprintf(2, "\nexec error");
   }
@@ -61,13 +78,15 @@ void execute_redirection(int argc, char **argv) {
   }
   if (pid > 0) {
     wait(0);
+    if(ifd > -1) close(ifd);
+    if(ofd > -1) close(ofd);
   }
 }
 
 void execute_pipe(int argc, char **argv) {
-    fprintf(2, "\nexecute_pipe");
-    for(int i=0; i<argc; i++) fprintf(2, "\n$$$%s", argv[i]);
-    fprintf(2, "\n");
+    // fprintf(2, "\nexecute_pipe");
+    // for(int i=0; i<argc; i++) fprintf(2, "\n$$$%s", argv[i]);
+    // fprintf(2, "\n");
   int pipe_pos = substr(argv, argc, "|");
   if (pipe_pos == -1) {
     execute_redirection(argc, argv);
@@ -86,6 +105,8 @@ void execute_pipe(int argc, char **argv) {
     if (first == 0) {
       close(1);
       dup(fd[1]);
+      close(fd[0]);
+      // for(int i=0; i < pipe_pos; i++) fprintf(2, "\n----first--argv:%s", argv[i]);
       execute_redirection(pipe_pos, argv);
       close(fd[1]);
     }
@@ -98,6 +119,9 @@ void execute_pipe(int argc, char **argv) {
       if (second == 0) {
         close(0);
         dup(fd[0]);
+        close(fd[1]);
+
+      // for(int i=0; i < argc - pipe_pos - 1; i++) fprintf(2, "\n----second--argv:%s", *(argv + pipe_pos + 1 + i));
         execute_redirection(argc - pipe_pos - 1, argv + pipe_pos + 1);
         close(fd[0]);
       }
@@ -128,15 +152,13 @@ int len;
 int cmd_len;
 
 int main(int argc, char *argv[]) {
-  printf("@ ");
   while (1) {
+    printf("@ ");
     p = line;
     while (1) {
       sz = read(0, p, 1);
-
       // 命令以换行符分开，读到换行符说明读完了一条命令。
-      if (*p == '\n') break;
-      if (sz == 0) break;
+      if (sz == 0 || *p == '\n') break;
       p++;
     }
     if (sz == 0) break;
@@ -144,7 +166,10 @@ int main(int argc, char *argv[]) {
     line[len - 1] = 0;
     // 一条命令的不同参数用空格分割，这儿把空格换成0；
     replace(line, len, ' ', 0);
-   
+
+    // for(int i=0; i< len; i++) fprintf(2, "\nline[%d]:%d,%c", i, line[i], line[i]);
+    // fprintf(2, "\n");
+
     p = line;
     cmd_len = 0;
     if(*p) cmd[cmd_len++] = p;
@@ -152,6 +177,9 @@ int main(int argc, char *argv[]) {
       if (*p == 0 && *(p + 1) != 0) cmd[cmd_len++] = p + 1;
       p++;
     }
+
+    // for(int i=0; i<cmd_len; i++) fprintf(2, "\ncmd[%d]:%s", i, cmd[i]);
+    // fprintf(2, "\n");
    
     execute_pipe(cmd_len, cmd);
     for(int i=0; i<ARG_SZ; i++) line[i] = 0;
