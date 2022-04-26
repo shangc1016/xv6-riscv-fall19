@@ -3,7 +3,6 @@
 #include "user/user.h"
 
 #define MAX_LEN 1024
-
 #define ARG_SZ 128
 
 void replace(char *str, int sz, char _old, char _new) {
@@ -22,14 +21,12 @@ int substr(char *argv[], int argc, char *str) {
 }
 
 void execute_redirection(int argc, char **argv) {
-  // fprintf(2, "execute_redirection pid= %d\n", getpid());
 
   int in = substr(argv, argc, "<");
   int out = substr(argv, argc, ">");
   int pid;
 
   if ((pid = fork()) == 0) {
-    // fprintf(2, "\nredirect pid=%d\n", getpid());
     if (in > -1) {
       close(0);
       if (open(argv[in + 1], O_RDONLY) != 0) {
@@ -46,10 +43,9 @@ void execute_redirection(int argc, char **argv) {
       }
       argv[out] = 0;
     }
-    // for(int i=0; i< argc; i++){
-    //   fprintf(2, "\n==%s", argv[i]);
-    // }
     exec(argv[0], argv);
+    fprintf(2, "exec error\n");
+    exit(-1);
   }
   if (pid > 0) {
     wait(0);
@@ -66,16 +62,14 @@ void execute_pipe(int argc, char **argv) {
     int fd[2];
     int first, second;
 
-    // create pipe
     if (pipe(fd) == -1) {
       fprintf(2, "pipe error\n");
       exit(-1);
     }
 
     if ((first = fork()) == 0) {
-      // fprintf(2, "\nfirst pid=%d\n", getpid());
       close(1);
-      dup(fd[1]);
+      if(dup(fd[1]) != 1) exit(-1);
       close(fd[0]);
       close(fd[1]);
       execute_redirection(pipe_pos, argv);
@@ -83,19 +77,18 @@ void execute_pipe(int argc, char **argv) {
     }
 
     if ((second = fork()) == 0) {
-      // fprintf(2, "\nsecond pid=%d\n", getpid());
       close(0);
       dup(fd[0]);
       close(fd[0]);
       close(fd[1]);
-      execute_redirection(argc - pipe_pos - 1, argv + pipe_pos + 1);
+      execute_pipe(argc - pipe_pos - 1, argv + pipe_pos + 1);
       exit(0);
     }
 
     wait(0);
-    // wait(0);
-    close(fd[0]);
     close(fd[1]);
+    wait(0);
+    close(fd[0]);
   }
 }
 
