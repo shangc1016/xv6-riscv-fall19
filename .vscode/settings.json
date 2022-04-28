@@ -9,6 +9,7 @@
         "fstream": "c",
         "param.h": "c",
         "spinlock.h": "c",
-        "defs.h": "c"
+        "defs.h": "c",
+        "memlayout.h": "c"
     }
 }
