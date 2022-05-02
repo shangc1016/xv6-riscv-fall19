@@ -10,6 +10,7 @@
         "param.h": "c",
         "spinlock.h": "c",
         "defs.h": "c",
-        "memlayout.h": "c"
+        "memlayout.h": "c",
+        "proc.h": "c"
     }
 }

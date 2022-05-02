@@ -10,7 +10,7 @@
             "stopAtEntry": true,
             "cwd": "${workspaceFolder}",
             "miDebuggerServerAddress": "127.0.0.1:26000", //见.gdbinit 中 target remote xxxx:xx
-            "miDebuggerPath": "/home/sc/dev/cDev/gdb/gdb/gdb", // which gdb-multiarch
+            "miDebuggerPath": "/usr/local/bin/riscv64-unknown-elf-gdb", // which gdb-multiarch
             "MIMode": "gdb",
             "preLaunchTask": "xv6build",
             "setupCommands": [

@@ -1,8 +1,10 @@
+// xv6-riscv/.vscode/tasks.json
 {
+    "version": "2.0.0",
     "tasks": [
         {
-            "type": "shell",
             "label": "xv6build",
+            "type": "shell",
             "isBackground": true,
             "command": "make qemu-gdb",
             "problemMatcher": [
@@ -22,6 +24,5 @@
                 }
             ]
         }
-    ],
-    "version": "2.0.0"
+    ]
 }
