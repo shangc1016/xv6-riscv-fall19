@@ -302,6 +302,9 @@ bd_init(void *base, void *end) {
   bd_base = (void *) p;
 
   // compute the number of sizes we need to manage [base, end)
+  // 这儿似乎是说，nsizes的大小是在LEAF_SIZE这一个链表中管理所有内存区域所对应的数组大小？
+  // bd: memory sz is 134045696 bytes; allocate an size array of length 24，
+  // 总的内存大小接近128MB，16B * 2^24 = 128MB
   nsizes = log2(((char *)end-p)/LEAF_SIZE) + 1;
   if((char*)end-p > BLK_SIZE(MAXSIZE)) {
     nsizes++;  // round up to the next power of 2

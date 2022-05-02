@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "types.h": "c",
+        "stat.h": "c",
+        "user.h": "c",
+        "fs.h": "c",
+        "fcntl.h": "c",
+        "*.tcc": "c",
+        "fstream": "c",
+        "param.h": "c",
+        "spinlock.h": "c",
+        "defs.h": "c",
+        "memlayout.h": "c",
+        "proc.h": "c"
+    }
+}
