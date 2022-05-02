@@ -7,7 +7,7 @@
 
 // Buddy allocator
 
-static int nsizes;     // the number of entries in bd_sizes array
+static int nsizes;     // the number of entries in bd_sizes array； buddy数组的长度
 
 #define LEAF_SIZE     16                         // The smallest block size
 #define MAXSIZE       (nsizes-1)                 // Largest index in bd_sizes array
@@ -31,8 +31,8 @@ struct sz_info {
 };
 typedef struct sz_info Sz_info;
 
-static Sz_info *bd_sizes; 
-static void *bd_base;   // start address of memory managed by the buddy allocator
+static Sz_info *bd_sizes;  // 全局的buddy数据结构，每一项是一个链表
+static void *bd_base;   // start address of memory managed by the buddy allocator； buddy 系统管理的内存起始地址
 static struct spinlock lock;
 
 // Return 1 if bit at position index in array is set to 1
@@ -292,6 +292,7 @@ bd_mark_unavailable(void *end, void *left) {
 }
 
 // Initialize the buddy allocator: it manages memory from [base, end).
+// 1、先看这儿，buddy系统的初始化，给出buddy系统维护的物理内存区间
 void
 bd_init(void *base, void *end) {
   char *p = (char *) ROUNDUP((uint64)base, LEAF_SIZE);
