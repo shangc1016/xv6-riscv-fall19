@@ -119,6 +119,7 @@ void *addr(int k, int bi) {
 }
 
 // allocate nbytes, but malloc won't return anything smaller than LEAF_SIZE
+// 从buddy中分配内存
 void *
 bd_malloc(uint64 nbytes)
 {
@@ -128,25 +129,35 @@ bd_malloc(uint64 nbytes)
 
   // Find a free block >= nbytes, starting with smallest k possible
   fk = firstk(nbytes);
+  // 首先对nbytes上取整为2的次幂大小
+
+  // 从大小和fk相同的位置开始遍历链表
   for (k = fk; k < nsizes; k++) {
     if(!lst_empty(&bd_sizes[k].free))
       break;
   }
+  // 找到bd_sizes最后了，意味着找完了，还没找到空闲内存
   if(k >= nsizes) { // No free blocks?
     release(&lock);
     return 0;
   }
 
   // Found a block; pop it and potentially split it.
+  // 找到了，
   char *p = lst_pop(&bd_sizes[k].free);
+  // 在这一级的alloc数组中更新这一块内存，
   bit_set(bd_sizes[k].alloc, blk_index(k, p));
+  // 把未分配的伙伴放到下一级链表中
   for(; k > fk; k--) {
+    // 在这个for循环中，p指针一直保持不变
     // split a block at size k and mark one half allocated at size k-1
     // and put the buddy on the free list at size k-1
     char *q = p + BLK_SIZE(k-1);   // p's buddy
     bit_set(bd_sizes[k].split, blk_index(k, p));
     bit_set(bd_sizes[k-1].alloc, blk_index(k-1, p));
     lst_push(&bd_sizes[k-1].free, q);
+    // 在for循环中，p指针一直不变，只不过一直在试图把p的大小切分，知道满足malloc的大小要求。
+    // 和bd_free对比的看
   }
   release(&lock);
 
@@ -175,20 +186,28 @@ bd_free(void *p) {
   for (k = size(p); k < MAXSIZE; k++) {
     int bi = blk_index(k, p);
     int buddy = (bi % 2 == 0) ? bi+1 : bi-1;
+    // 首先把这个块对应大小的alloc位给清0了，表示已经释放了这个块
     bit_clear(bd_sizes[k].alloc, bi);  // free p at size k
+    // 然后看一下他的伙伴是否空闲，如果不空闲，啥也做不了；如果空闲，就可以合并
     if (bit_isset(bd_sizes[k].alloc, buddy)) {  // is buddy allocated?
       break;   // break out of loop
     }
     // budy is free; merge with buddy
     q = addr(k, buddy);
+    // 把伙伴的地址从当前块大小的free链表中删除
     lst_remove(q);    // remove buddy from free list
+    // 找到伙伴中的第一个，(偶数，基数)算一个伙伴，第一个就是说偶数表示的那一个
     if(buddy % 2 == 0) {
       p = q;
     }
     // at size k+1, mark that the merged buddy pair isn't split
     // anymore
+    // 把伙伴合并之后的上一级split清0
     bit_clear(bd_sizes[k+1].split, blk_index(k+1, p));
+
+    // 在for循环中，指针p基本一直不变，只不过在遇到伙伴的时候可能指向第一个伙伴。通过循环扩大指针p指向的内存大小，最后加到空闲链表
   }
+  // 最后把最大的空闲伙伴加入到空闲链表free
   lst_push(&bd_sizes[k].free, p);
   release(&lock);
 }
@@ -213,6 +232,7 @@ log2(uint64 n) {
 }
 
 // Mark memory from [start, stop), starting at size 0, as allocated. 
+// 标记为已经使用
 void
 bd_mark(void *start, void *stop)
 {
@@ -222,6 +242,7 @@ bd_mark(void *start, void *stop)
     panic("bd_mark");
 
   for (int k = 0; k < nsizes; k++) {
+    // 可以看到，这儿也是按照块大小不同进行分的
     bi = blk_index(k, start);
     bj = blk_index_next(k, stop);
     for(; bi < bj; bi++) {
@@ -236,11 +257,13 @@ bd_mark(void *start, void *stop)
 
 // If a block is marked as allocated and the buddy is free, put the
 // buddy on the free list at size k.
+// 回过头看这个函数就比较清楚了，就是说按在bd_sizes数组中第k项的块大小计算的第bi个块加入到k的free链表中管理
 int
 bd_initfree_pair(int k, int bi) {
   int buddy = (bi % 2 == 0) ? bi+1 : bi-1;
   int free = 0;
   if(bit_isset(bd_sizes[k].alloc, bi) !=  bit_isset(bd_sizes[k].alloc, buddy)) {
+    // 如果火把那状态不一样，那么肯定是一个在使用，一个空闲。找到空闲的哪个，加入和他块大小相同的链表
     // one of the pair is free
     free = BLK_SIZE(k);
     if(bit_isset(bd_sizes[k].alloc, bi))
@@ -250,21 +273,25 @@ bd_initfree_pair(int k, int bi) {
   }
   return free;
 }
-  
+
 // Initialize the free lists for each size k.  For each size k, there
 // are only two pairs that may have a buddy that should be on free list:
 // bd_left and bd_right.
+// 这是buddy的另一个初始化函数。
+// 从最两边开始分，然后一次扩大k值，太巧秒了woc
 int
 bd_initfree(void *bd_left, void *bd_right) {
   int free = 0;
 
   for (int k = 0; k < MAXSIZE; k++) {   // skip max size
-    int left = blk_index_next(k, bd_left);
-    int right = blk_index(k, bd_right);
-    free += bd_initfree_pair(k, left);
-    if(right <= left)
+    int left = blk_index_next(k, bd_left);         // blk_index_next(a, b)：计算b相对于bd_base的偏移序号，每个块大小为k，然后再上取整加1
+    int right = blk_index(k, bd_right);            // blk_index：基本和blk_index_next相同，不上取整加1
+    free += bd_initfree_pair(k, left);             // 对于每一种大小的块，在内部的块已经在bd_init中标记为0，即标记为空闲，而处于两边边界的块则还需要进一步判断
+    if(right <= left)                              // （因为左边是buddy的元数据占用，右边是不可用的部分地址）。所以需要在继续判断一次，看能不能扩充空闲块。
       continue;
     free += bd_initfree_pair(k, right);
+    // 判断右边界的块是否空闲；同上
+    // 有可能在左右两侧都出现了这个问题，所以初始化之后链表最长可能为3
   }
   return free;
 }
@@ -296,10 +323,12 @@ bd_mark_unavailable(void *end, void *left) {
 void
 bd_init(void *base, void *end) {
   char *p = (char *) ROUNDUP((uint64)base, LEAF_SIZE);
+  // 首先计算buddy分配器所管理物理内存的起始地址，计算内存对齐;即物理内存起始地址不约定按照最小的buddy块对齐(即设置base增加到最小的16字节的倍数)
   int sz;
 
   initlock(&lock, "buddy");
   bd_base = (void *) p;
+  // buddy alloctor全局变量bd_base
 
   // compute the number of sizes we need to manage [base, end)
   // 这儿似乎是说，nsizes的大小是在LEAF_SIZE这一个链表中管理所有内存区域所对应的数组大小？
@@ -309,45 +338,59 @@ bd_init(void *base, void *end) {
   if((char*)end-p > BLK_SIZE(MAXSIZE)) {
     nsizes++;  // round up to the next power of 2
   }
+  // nsizes 对应在buddy数组的长度，这样算出来的nsizes大小表示，最大快一块可以表示所有内存
+  // 通过debug可知，nsize=24，即2^(24-1) * 16B = 128MB.基本等于buddy管理的物理内存大小
 
   printf("bd: memory sz is %d bytes; allocate an size array of length %d\n",
          (char*) end - p, nsizes);
 
   // allocate bd_sizes array
-  bd_sizes = (Sz_info *) p;
-  p += sizeof(Sz_info) * nsizes;
-  memset(bd_sizes, 0, sizeof(Sz_info) * nsizes);
+  bd_sizes = (Sz_info *) p;   // bd_sizes 就是buddy的数组，全局变量，记录物理内存块分配的元数据bd_sizes
+  p += sizeof(Sz_info) * nsizes;   // p指针后移，空出的内存用来初始化buddy长度为nsizes的数组bd_sizes
+  memset(bd_sizes, 0, sizeof(Sz_info) * nsizes);  // 把相应的空间置为0
 
   // initialize free list and allocate the alloc array for each size k
-  for (int k = 0; k < nsizes; k++) {
-    lst_init(&bd_sizes[k].free);
+  for (int k = 0; k < nsizes; k++) {    // 初始化每个数组的双向链表，以及alloc这一块作用是bitmap的内存
+    lst_init(&bd_sizes[k].free);  // 初始化内核双向链表
     sz = sizeof(char)* ROUNDUP(NBLK(k), 8)/8;
-    bd_sizes[k].alloc = p;
-    memset(bd_sizes[k].alloc, 0, sz);
+    // sz就是计算每中大小的块最多有多少个，即对于每个bd_sizes[k],其free链表的长度，
+    // 因为把整个物理分成单一的块大小都可以管理，即对应每种块大小，sz = 当前块大小对应块数量 / sizeof(char)，bitmap单位是位
+    // 当k==0的时候，sz = 1M ,即128MB/16B = 8M， 8M/8 = 1M  
+    // 然后在挨着bd_sizes数组的地方分配内存
+    // 在最后一层，每个块大小128MB(16B * 2^23),一共需要一个bit表示使用情况。
+    // 所以这个alloc数组大小是个等比数列，从1M到1bit，
+      bd_sizes[k].alloc = p;
+    memset(bd_sizes[k].alloc, 0, sz); 
     p += sz;
   }
+  // 初始化bd_sizes这个数组，初始化其中的free链表，以及alloc数组，这个alloc数组就是对应某种块大小的bitmap
+  // 下面初始化split也是一样的，记录split的bitmap
 
   // allocate the split array for each size k, except for k = 0, since
   // we will not split blocks of size k = 0, the smallest size.
-  for (int k = 1; k < nsizes; k++) {
+  for (int k = 1; k < nsizes; k++) {   // 继续分配这个数组中split的bitmap这块内存
     sz = sizeof(char)* (ROUNDUP(NBLK(k), 8))/8;
     bd_sizes[k].split = p;
     memset(bd_sizes[k].split, 0, sz);
+    // split数组和alloc数组完全相同
     p += sz;
   }
   p = (char *) ROUNDUP((uint64) p, LEAF_SIZE);
+  // 在这儿，p指针再次内存对齐
 
   // done allocating; mark the memory range [base, p) as allocated, so
   // that buddy will not hand out that memory.
-  int meta = bd_mark_data_structures(p);
+  int meta = bd_mark_data_structures(p);    /// 把buddy元数据使用的内存在buddy数组中标记为已经使用
   
   // mark the unavailable memory range [end, HEAP_SIZE) as allocated,
   // so that buddy will not hand out that memory.
-  int unavailable = bd_mark_unavailable(end, p);
+  int unavailable = bd_mark_unavailable(end, p);    // 把base到end这段内存中向上取整的部分设置为unavailable，即标记为1，已经被使用
+  // unavailable是整个物理内存最大处内存对齐差额
   void *bd_end = bd_base+BLK_SIZE(MAXSIZE)-unavailable;
+  // 然后设置b_end为buddy实际管理物理内存的最大地址
   
   // initialize free lists for each size k
-  int free = bd_initfree(p, bd_end);
+  int free = bd_initfree(p, bd_end);   // 初始化空闲内存区域
 
   // check if the amount that is free is what we expect
   if(free != BLK_SIZE(MAXSIZE)-meta-unavailable) {

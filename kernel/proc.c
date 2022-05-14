@@ -250,6 +250,7 @@ fork(void)
 {
   int i, pid;
   struct proc *np;
+  printf("==sc\n");
   struct proc *p = myproc();
 
   // Allocate process.

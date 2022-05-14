@@ -37,6 +37,7 @@ argfd(int n, int *pfd, struct file **pf)
 
 // Allocate a file descriptor for the given file.
 // Takes over file reference from caller on success.
+// 这个fdalloc才是真正把文件和进程关系起来，返回一个进程的文件描述符，类型为int
 static int
 fdalloc(struct file *f)
 {
@@ -99,6 +100,7 @@ sys_close(void)
 
   if(argfd(0, &fd, &f) < 0)
     return -1;
+  printf("close fd:%d\n", fd);
   myproc()->ofile[fd] = 0;
   fileclose(f);
   return 0;
@@ -315,7 +317,6 @@ sys_open(void)
       return -1;
     }
   }
-
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op(ROOTDEV);

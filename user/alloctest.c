@@ -6,6 +6,8 @@
 #include "kernel/memlayout.h"
 #include "user/user.h"
 
+
+// fork50个子进程，在子进程中宁打开10个文件，测试
 void
 test0() {
   enum { NCHILD = 50, NFD = 10};

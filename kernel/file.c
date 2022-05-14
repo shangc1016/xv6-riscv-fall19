@@ -16,31 +16,43 @@
 struct devsw devsw[NDEV];
 struct {
   struct spinlock lock;
-  struct file file[NFILE];
+  // struct file file[NFILE];
 } ftable;
 
+// 这个函数在最开始main中被调用，用来初始化，我们在这个初始化ftable中file数组的大小为NFILE，即100；
 void
 fileinit(void)
 {
   initlock(&ftable.lock, "ftable");
+  
 }
 
 // Allocate a file structure.
+// dfilealloc 是在全局的ftable中分配一个未被应用的file结构体，并且返回一个file结构体指针
 struct file*
 filealloc(void)
 {
-  struct file *f;
+  // struct file *f;
 
   acquire(&ftable.lock);
-  for(f = ftable.file; f < ftable.file + NFILE; f++){
-    if(f->ref == 0){
-      f->ref = 1;
-      release(&ftable.lock);
-      return f;
-    }
+
+  struct file * filp = (struct file *)bd_malloc(sizeof(struct file));
+  if(filp == 0){
+    release(&ftable.lock);
+    return 0;
   }
+  filp->ref = 1;
   release(&ftable.lock);
-  return 0;
+  return filp;
+  // for(f = ftable.file; f < ftable.file + NFILE; f++){
+  //   if(f->ref == 0){
+  //     f->ref = 1;
+  //     release(&ftable.lock);
+  //     return f;
+  //   }
+  // }
+  // release(&ftable.lock);
+  // return 0;
 }
 
 // Increment ref count for file f.
@@ -56,6 +68,7 @@ filedup(struct file *f)
 }
 
 // Close file f.  (Decrement ref count, close when reaches 0.)
+// 需要改动
 void
 fileclose(struct file *f)
 {
@@ -68,9 +81,10 @@ fileclose(struct file *f)
     release(&ftable.lock);
     return;
   }
-  ff = *f;
+  ff = *f;   
   f->ref = 0;
   f->type = FD_NONE;
+  bd_free(f);
   release(&ftable.lock);
 
   if(ff.type == FD_PIPE){

@@ -8,6 +8,8 @@ struct file {
   uint off;          // FD_INODE
   short major;       // FD_DEVICE
 };
+// 这个file 对应不是用户进程的哪个file，而是对于磁盘上存储的file的一个软件对应；
+// 可以认为这个file结构体和文件系统的文件一一对应
 
 #define major(dev)  ((dev) >> 16 & 0xFFFF)
 #define minor(dev)  ((dev) & 0xFFFF)

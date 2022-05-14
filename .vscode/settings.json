@@ -11,6 +11,13 @@
         "spinlock.h": "c",
         "defs.h": "c",
         "memlayout.h": "c",
-        "proc.h": "c"
-    }
+        "proc.h": "c",
+        "cstring": "c",
+        "array": "c",
+        "string_view": "c",
+        "initializer_list": "c",
+        "utility": "c",
+        "file.h": "c"
+    },
+    "debug.console.fontSize": 26
 }
