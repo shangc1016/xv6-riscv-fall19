@@ -16,6 +16,7 @@ kinit()
 {
   char *p = (char *) PGROUNDUP((uint64) end);
   bd_init(p, (void*)PHYSTOP);
+  // bd_print();
 }
 
 // Free the page of physical memory pointed at by v,

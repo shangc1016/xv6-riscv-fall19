@@ -100,7 +100,6 @@ sys_close(void)
 
   if(argfd(0, &fd, &f) < 0)
     return -1;
-  printf("close fd:%d\n", fd);
   myproc()->ofile[fd] = 0;
   fileclose(f);
   return 0;
@@ -412,6 +411,7 @@ sys_chdir(void)
 uint64
 sys_exec(void)
 {
+  printf("==sc\n");
   char path[MAXPATH], *argv[MAXARG];
   int i;
   uint64 uargv, uarg;
@@ -432,6 +432,7 @@ sys_exec(void)
       break;
     }
     argv[i] = kalloc();
+
     if(argv[i] == 0)
       panic("sys_exec kalloc");
     if(fetchstr(uarg, argv[i], PGSIZE) < 0){
@@ -440,10 +441,10 @@ sys_exec(void)
   }
 
   int ret = exec(path, argv);
-
+  printf("111==\n");
   for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)
     kfree(argv[i]);
-
+  printf("ret==\n");
   return ret;
 }
 
