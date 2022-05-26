@@ -451,3 +451,29 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+
+
+void vmprint_level(pagetable_t pagetable, int level) {
+
+    for(int i = 0; i < 512; i++){
+        uint64 pte = pagetable[i];
+
+        // 如果pte条目有效
+        if((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0){
+            // 打印pte
+            uint64 child = PTE2PA(pte);
+            for(int j=0; j< level; j++) printf(".. ");
+            printf("..%d: pte %p pa %p\n",i , pte, child);
+            vmprint_level((pagetable_t)child, level + 1);
+        } else if(pte & PTE_V){
+            // 到达第三级页表，也就是叶子
+            printf(".. .. ..%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+        }
+    }
+}
+
+
+void vmprint(pagetable_t pagetable){
+    vmprint_level(pagetable, 0);
+}

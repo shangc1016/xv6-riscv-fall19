@@ -99,6 +99,13 @@ exec(char *path, char **argv)
   // value, which goes in a0.
   p->tf->a1 = sp;
 
+
+  // 这儿的pagetable已经构造好了
+  // 打印系统第一个进程initcode的页表
+  if(strncmp(p->name, "initcode", sizeof(p->name)) == 0){
+      vmprint(pagetable);
+  }
+
   // Save program name for debugging.
   for(last=s=path; *s; s++)
     if(*s == '/')
