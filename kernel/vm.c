@@ -446,10 +446,33 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 }
 
 
-// 打印进程的页表，
-void vmprint(pagetable_t pagetable) {
-    for(int i=0; i< 512; i++){
+
+void vmprint_level(pagetable_t pagetable, int level) {
+    for(int i = 0; i < 512; i++){
         pte_t pte = pagetable[i];
-        printf("%x \n", pte);
+        // 前两级页表因为还有包括下一级也表地址，不能明确知道单个具体页表的权限，所以非叶子页表具有读写执行所有权限
+        if((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+            for(int j=0; j<level; j++) {
+                printf(".. ");
+            }
+            // pte有效，也表示个三级翻译机制，需要翻译三次
+            // 根据pte得到物理地址，物理地址指向的地方又是一个pagetable
+            uint64 child = PTE2PA(pte);
+            printf("..%d: pte %p pa %p\n", i, pte, child);
+            vmprint_level((pagetable_t)child, level+1);
+        } else if (pte & PTE_V) {
+            // 叶子，走到页表的最后一级，也就是第三级了
+            uint64 child  =PTE2PA(pte);
+            printf(".. .. ..%d: pte %p pa %p\n", i, pte, child);
+        }
     }
+}   
+
+// 打印进程的页表映射
+void vmprint(pagetable_t pagetable) {
+    vmprint_level(pagetable, 0);
+    // 为啥打印的结果pte和pa这么相似呢，因为都是64位的。但具体含义不同。
+    // pa是物理地址；pte是地址转换映射表，不是地址；
+    // PTE_V 这个标记位标记这个pte是不是有效的，这个意思就是说这个pte是否包含有效的地址转换
+    // 前两级page table的标志位是PTE_R、PTE_W、PTE_X全部都有的
 }

@@ -414,7 +414,6 @@ sys_chdir(void)
 uint64
 sys_exec(void)
 {
-  printf("==sc\n");
   char path[MAXPATH], *argv[MAXARG];
   int i;
   uint64 uargv, uarg;
@@ -444,10 +443,8 @@ sys_exec(void)
   }
 
   int ret = exec(path, argv);
-  printf("111==\n");
   for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)
     kfree(argv[i]);
-  printf("ret==\n");
   return ret;
 }
 

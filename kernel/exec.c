@@ -38,6 +38,7 @@ exec(char *path, char **argv)
     goto bad;
 
   // 然后分配页表，这个页表里面没有用户进程特有的数据，只有trapframe和trampoline，用于系统调用的所有进程都一样的页表映射。
+  // 这个页表还没有设置为当前进程的页表。
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
@@ -61,7 +62,7 @@ exec(char *path, char **argv)
       goto bad;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
-    //   已经分配好了虚地址空间了，然后就读二进制文件，把各个段放到虚地址对应的物理地址的各位置。
+    //   uvmalloc已经分配好了虚地址空间了，然后就读二进制文件，把各个段放到虚地址对应的物理地址的各位置。
     if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
       goto bad;
   }
@@ -72,20 +73,23 @@ exec(char *path, char **argv)
 
   p = myproc();
   uint64 oldsz = p->sz;
-  // 当前进程的内存大小，当前进程是啥？
+  // 当前进程的内存大小
+  // 这个oldsz是为了后面释放原来的页表准备的。
 
   // Allocate two pages at the next page boundary.
   // Use the second as the user stack.
+  // 在当前进程前面分配两个页面，然后把第二个页面当做栈空间。
+  // 设置sp，和stack_base
   sz = PGROUNDUP(sz);
   if((sz = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
   uvmclear(pagetable, sz-2*PGSIZE);
   sp = sz;
-  stackbase = sp - PGSIZE;
-  // 在当前进程前面分配两个页面，然后把第二个页面当做栈空间。
-  // 设置sp，和stack_base
+  stackbase = sp - PGSIZE;   
+  
 
   // 然后最开始的参数argv按照顺序压到栈中。
+  // argv是个二维数组，argc是参数长度
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
@@ -111,21 +115,35 @@ exec(char *path, char **argv)
   // arguments to user main(argc, argv)
   // argc is returned via the system call return
   // value, which goes in a0.
+  // 设置进程的a1寄存器为sp，等到退出syscall的时候，从trapframe中回复寄存器的值，a1就是函数调用的参数
   p->tf->a1 = sp;
 
+
+  if(strncmp(p->name, "initcode", sizeof(p->name)) == 0){
+      printf("page table %p\n", pagetable);
+      vmprint(pagetable);
+  }
+
+
   // Save program name for debugging.
+  // 设置进程的名字等信息用来debug
   for(last=s=path; *s; s++)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
     
   // Commit to the user image.
+  // 在这儿切换进程页表，以及sz，并且释放旧的页表
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
   p->sz = sz;
+  // epc在恢复寄存器的时候就是pc寄存器，函数中从这儿开始执行
   p->tf->epc = elf.entry;  // initial program counter = main
+  // 初始化栈指针sp
   p->tf->sp = sp; // initial stack pointer
+  // 释放旧页表
   proc_freepagetable(oldpagetable, oldsz);
+  // 返回的是argc参数长度，syscall的返回值放在a0寄存器，a0寄存器刚好又是函数调用的参数，a1放的是argv参数
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:

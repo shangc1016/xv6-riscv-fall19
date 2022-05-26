@@ -438,7 +438,6 @@ bd_init(void *base, void *end) {
   
   // initialize free lists for each size k
   int free = bd_initfree(p, bd_end);   // 初始化空闲内存区域
-  printf("free=%d\n", free);
 
   // check if the amount that is free is what we expect
   if(free != BLK_SIZE(MAXSIZE)-meta-unavailable) {
