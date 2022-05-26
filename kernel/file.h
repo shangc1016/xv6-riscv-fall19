@@ -16,7 +16,7 @@ struct file {
 #define	mkdev(m,n)  ((uint)((m)<<16| (n)))
 
 // in-memory copy of an inode
-struct inode {
+struct inode {  
   uint dev;           // Device number
   uint inum;          // Inode number
   int ref;            // Reference count
@@ -29,7 +29,7 @@ struct inode {
   short nlink;
   uint size;
   uint addrs[NDIRECT+1];
-};
+};  
 
 // map major device number to device functions.
 struct devsw {

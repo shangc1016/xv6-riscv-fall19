@@ -15,14 +15,14 @@ exec(char *path, char **argv)
   char *s, *last;
   int i, off;
   uint64 argc, sz, sp, ustack[MAXARG+1], stackbase;
-  struct elfhdr elf;
-  struct inode *ip;
-  struct proghdr ph;
-  pagetable_t pagetable = 0, oldpagetable;
+  struct elfhdr elf;    // elf头
+  struct inode *ip;     // 程序二进制文件的inode
+  struct proghdr ph;    // elf文件中的program header
+  pagetable_t pagetable = 0, oldpagetable;   // 进程页表
   struct proc *p = myproc();
 
-  begin_op(ROOTDEV);
-
+  begin_op(ROOTDEV); 
+ // 在这儿做了path到inode的转换
   if((ip = namei(path)) == 0){
     end_op(ROOTDEV);
     return -1;
@@ -30,17 +30,23 @@ exec(char *path, char **argv)
   ilock(ip);
 
   // Check ELF header
+  // 首先在程序二进制文件最开始读一个elf header大小的数据到elfheader结构体中
   if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))
     goto bad;
+  // 判断魔数  
   if(elf.magic != ELF_MAGIC)
     goto bad;
 
+  // 然后分配页表，这个页表里面没有用户进程特有的数据，只有trapframe和trampoline，用于系统调用的所有进程都一样的页表映射。
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
   // Load program into memory.
-  sz = 0;
+  // 加载各个程序段到内存
+  sz = 0; // 这儿的sz表示新的进程的大小
+  // 依次把program header读入到ph结构体中
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
+    //   读文件的偏移最初有elf header给出，后面依次加上一个program header的长度
     if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
       goto bad;
     if(ph.type != ELF_PROG_LOAD)
@@ -49,19 +55,24 @@ exec(char *path, char **argv)
       goto bad;
     if(ph.vaddr + ph.memsz < ph.vaddr)
       goto bad;
+    //   uvmalloc:(user virtual memory malloc)这个函数根据program header中每个段的虚地址做映射。
+    // uvmalloc主要就是从内核分配空间，kalloc，然后memset清空，然后mappages映射到虚地址的不同地方。
     if((sz = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
+    //   已经分配好了虚地址空间了，然后就读二进制文件，把各个段放到虚地址对应的物理地址的各位置。
     if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
       goto bad;
   }
   iunlockput(ip);
   end_op(ROOTDEV);
   ip = 0;
+//   上面已经把新进程空间创建好了
 
   p = myproc();
   uint64 oldsz = p->sz;
+  // 当前进程的内存大小，当前进程是啥？
 
   // Allocate two pages at the next page boundary.
   // Use the second as the user stack.
@@ -71,7 +82,10 @@ exec(char *path, char **argv)
   uvmclear(pagetable, sz-2*PGSIZE);
   sp = sz;
   stackbase = sp - PGSIZE;
+  // 在当前进程前面分配两个页面，然后把第二个页面当做栈空间。
+  // 设置sp，和stack_base
 
+  // 然后最开始的参数argv按照顺序压到栈中。
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)

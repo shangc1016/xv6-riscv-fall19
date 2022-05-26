@@ -444,3 +444,12 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+
+// 打印进程的页表，
+void vmprint(pagetable_t pagetable) {
+    for(int i=0; i< 512; i++){
+        pte_t pte = pagetable[i];
+        printf("%x \n", pte);
+    }
+}

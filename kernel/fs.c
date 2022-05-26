@@ -522,6 +522,7 @@ namecmp(const char *s, const char *t)
 
 // Look for a directory entry in a directory.
 // If found, set *poff to byte offset of entry.
+// dirlookup：在inode中找那么对应的下一级目录
 struct inode*
 dirlookup(struct inode *dp, char *name, uint *poff)
 {
@@ -621,16 +622,23 @@ skipelem(char *path, char *name)
 // If parent != 0, return the inode for the parent and copy the final
 // path element into name, which must have room for DIRSIZ bytes.
 // Must be called inside a transaction since it calls iput().
+
+
+// 这个过程就是根据inode找到这个文件，读这个文件(这个文件是用户看到的目录)的内容，然后依次找到下一级目录，
 static struct inode*
 namex(char *path, int nameiparent, char *name)
 {
   struct inode *ip, *next;
 
+// 判断是绝对路径还是相对路径，对应不同的起始inode
   if(*path == '/')
     ip = iget(ROOTDEV, ROOTINO);
   else
     ip = idup(myproc()->cwd);
-
+    // ip 是起始查找的inode号码
+    
+// skilelem：分解路径
+// path="/some/path", name="" -> path="/path", name="some"
   while((path = skipelem(path, name)) != 0){
     ilock(ip);
     if(ip->type != T_DIR){
@@ -642,6 +650,7 @@ namex(char *path, int nameiparent, char *name)
       iunlock(ip);
       return ip;
     }
+    // dirlookup：从inode对应的目录文件中找到对应文件名为name的文件
     if((next = dirlookup(ip, name, 0)) == 0){
       iunlockput(ip);
       return 0;
@@ -656,6 +665,7 @@ namex(char *path, int nameiparent, char *name)
   return ip;
 }
 
+// namei：根据打开文件的路径得到文件的inode号码
 struct inode*
 namei(char *path)
 {

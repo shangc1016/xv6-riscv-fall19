@@ -293,9 +293,11 @@ sys_open(void)
   struct inode *ip;
   int n;
 
+//  解析open参数，path和flag
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
 
+// 日志相关
   begin_op(ROOTDEV);
 
   if(omode & O_CREATE){
@@ -305,6 +307,7 @@ sys_open(void)
       return -1;
     }
   } else {
+    //   根据filepath得到文件的inode，关键
     if((ip = namei(path)) == 0){
       end_op(ROOTDEV);
       return -1;
@@ -321,7 +324,7 @@ sys_open(void)
     end_op(ROOTDEV);
     return -1;
   }
-
+// 分配file结构体，分配进程空间的fd
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -329,7 +332,7 @@ sys_open(void)
     end_op(ROOTDEV);
     return -1;
   }
-
+// 用inode的相关属性填到file结构体
   if(ip->type == T_DEVICE){
     f->type = FD_DEVICE;
     f->major = ip->major;
