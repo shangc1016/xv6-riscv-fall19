@@ -103,6 +103,7 @@ exec(char *path, char **argv)
   // 这儿的pagetable已经构造好了
   // 打印系统第一个进程initcode的页表
   if(strncmp(p->name, "initcode", sizeof(p->name)) == 0){
+      printf("page table %p\n", pagetable);
       vmprint(pagetable);
   }
 

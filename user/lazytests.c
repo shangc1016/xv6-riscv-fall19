@@ -9,22 +9,23 @@
 #include "kernel/riscv.h"
 
 #define REGION_SZ (1024 * 1024 * 1024)
+// 这个大小是1G，能申请这么大的内存吗？
 
+// 1、这个函数，用sbrk分配了很大一块内存；然后挨个读这些内存区域；
 void
 sparse_memory(char *s)
 {
   char *i, *prev_end, *new_end;
-  
-  prev_end = sbrk(REGION_SZ);
+  // lazy分配，没有这么大的物理内存，sbrk的时候lazy可以成功
+  prev_end = sbrk(REGION_SZ); 
   if (prev_end == (char*)0xffffffffffffffffL) {
     printf("sbrk() failed\n");
     exit(1);
   }
   new_end = prev_end + REGION_SZ;
-
+  // 访问内存，i每次增加64个页面；也就是实际上只用到了4096个页面，就是16MB。这个内存空间还是足够的
   for (i = prev_end + PGSIZE; i < new_end; i += 64 * PGSIZE)
     *(char **)i = i;
-
   for (i = prev_end + PGSIZE; i < new_end; i += 64 * PGSIZE) {
     if (*(char **)i != i) {
       printf("failed to read value from memory\n");
@@ -35,12 +36,13 @@ sparse_memory(char *s)
   exit(0);
 }
 
+// 2、
 void
 sparse_memory_unmap(char *s)
 {
   int pid;
   char *i, *prev_end, *new_end;
-
+  // 首先sbrk预定了很大的内存1G
   prev_end = sbrk(REGION_SZ);
   if (prev_end == (char*)0xffffffffffffffffL) {
     printf("sbrk() failed\n");
@@ -48,9 +50,10 @@ sparse_memory_unmap(char *s)
   }
   new_end = prev_end + REGION_SZ;
 
+  // 首先，访问内存测试
   for (i = prev_end + PGSIZE; i < new_end; i += PGSIZE * PGSIZE)
     *(char **)i = i;
-
+  // 然后fork测试
   for (i = prev_end + PGSIZE; i < new_end; i += PGSIZE * PGSIZE) {
     pid = fork();
     if (pid < 0) {
@@ -73,6 +76,7 @@ sparse_memory_unmap(char *s)
   exit(0);
 }
 
+// 3、
 void
 oom(char *s)
 {
@@ -135,6 +139,7 @@ main(int argc, char *argv[])
     { oom, "out of memory"},
     { 0, 0},
   };
+  // 测试主要是上面这三个函数
     
   printf("lazytests starting\n");
 

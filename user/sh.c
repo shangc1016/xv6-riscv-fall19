@@ -164,6 +164,7 @@ main(void)
         fprintf(2, "cannot cd %s\n", buf+3);
       continue;
     }
+    // 执行命令就在这儿
     if(fork1() == 0)
       runcmd(parsecmd(buf));
     wait(0);

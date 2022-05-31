@@ -94,7 +94,7 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
+  // 现在数组中找到一个空闲的进程proc结构体，找不到出错
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -106,15 +106,20 @@ allocproc(void)
   return 0;
 
 found:
+  // 找到的话，分配一个pid
   p->pid = allocpid();
 
   // Allocate a trapframe page.
+  // kalloc分配一个物理页面放trapframe，
+  // 那为啥trampoline不需要呢？因为trampoline是进入内核的跳板，代码在内核共用，不需要kalloc
+  // trapframe是每个进程进入内核的时候的现场，是进程独有的。
   if((p->tf = (struct trapframe *)kalloc()) == 0){
     release(&p->lock);
     return 0;
   }
 
   // An empty user page table.
+  // 在这一步，新的进程的页表还只有最高处的trapframe以及trampoline两个页面
   p->pagetable = proc_pagetable(p);
 
   // Set up new context to start executing at forkret,
@@ -132,9 +137,12 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  // 把进程的trapframe物理内存释放
+  // 进程的tf字段是一个物理地址，不允许进程使用这个地址
   if(p->tf)
     kfree((void*)p->tf);
   p->tf = 0;
+  // 根据页表，把分配的物理地址全部释放
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -162,10 +170,12 @@ proc_pagetable(struct proc *p)
   // at the highest user virtual address.
   // only the supervisor uses it, on the way
   // to/from user space, so not PTE_U.
+  // 把trampoline映射到地址最高处
   mappages(pagetable, TRAMPOLINE, PGSIZE,
            (uint64)trampoline, PTE_R | PTE_X);
 
   // map the trapframe just below TRAMPOLINE, for trampoline.S.
+  // 把trapframe页面映射到地址次高处
   mappages(pagetable, TRAPFRAME, PGSIZE,
            (uint64)(p->tf), PTE_R | PTE_W);
 
@@ -176,9 +186,11 @@ proc_pagetable(struct proc *p)
 // physical memory it refers to.
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
-{
+{ // trampoline需要进程服用，所以只需要解除映射
   uvmunmap(pagetable, TRAMPOLINE, PGSIZE, 0);
+  // trapframe已经由调用方释放了，这儿解除映射
   uvmunmap(pagetable, TRAPFRAME, PGSIZE, 0);
+  // 解除其余部分的映射
   if(sz > 0)
     uvmfree(pagetable, sz);
 }
@@ -251,11 +263,14 @@ fork(void)
   struct proc *p = myproc();
 
   // Allocate process.
+  // 分配进程的空间，allocproc函数中的内容都是kalloc出来的，和lazy没啥关系
   if((np = allocproc()) == 0){
     return -1;
   }
+  // allocproc之后的进程只有两个页面，trapframe和trampoline
 
   // Copy user memory from parent to child.
+  // fork把父进程的所有页表复制给子进程
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
@@ -326,6 +341,7 @@ exit(int status)
     panic("init exiting");
 
   // Close all open files.
+  // 关闭进程打开文件
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){
       struct file *f = p->ofile[fd];
@@ -385,6 +401,7 @@ exit(int status)
 int
 wait(uint64 addr)
 {
+
   struct proc *np;
   int havekids, pid;
   struct proc *p = myproc();
@@ -414,6 +431,7 @@ wait(uint64 addr)
             release(&p->lock);
             return -1;
           }
+          // 父进程被唤醒之后，找到一个子进程，并且清理子进程freeprocS
           freeproc(np);
           release(&np->lock);
           release(&p->lock);
@@ -631,6 +649,13 @@ either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
 {
   struct proc *p = myproc();
   if(user_dst){
+    // 拷贝到用户进程空间，dst是用户空间的地址，len是长度，dst + len 应该小于p->sz，否则内存越界
+    // 这样以来，在copyout函数中，进程的地址在也表中映射的物理页应该都是有效的，否则直接分配
+    // if(dst > p->sz){
+    //     printf("456\n");
+    //     p->killed = 1;
+    //     exit(0);
+    // }
     return copyout(p->pagetable, dst, src, len);
   } else {
     memmove((char *)dst, src, len);
@@ -646,6 +671,13 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
 {
   struct proc *p = myproc();
   if(user_src){
+    // 拷贝到内核，src是用户进程空间的地址
+    // src是用户内存空间的一段地址，src + len 要小于 p->sz，否则内存越界
+    // if(src > p->sz){
+    //     printf("123\n");
+    //     p->killed = 1;
+    //     exit(0);
+    // }
     return copyin(p->pagetable, dst, src, len);
   } else {
     memmove(dst, (char*)src, len);

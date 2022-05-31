@@ -103,9 +103,13 @@ filestat(struct file *f, uint64 addr)
 
 // Read from file f.
 // addr is a user virtual address.
+// sys_read调用它，由于lazt allocation，这个addr可能还没mapping
 int
 fileread(struct file *f, uint64 addr, int n)
 {
+  // 在读写的时候，这个addr都是用户进程的地址，长度是n；那么就需要判断在这个进程的也表中，这个虚拟地址有没有翻译。
+  // 没有的话，还需要先翻译，
+  // read、write函数最后会调用readi读文件到地址addr ，进到readi、writei里面查看
   int r = 0;
 
   if(f->readable == 0)
@@ -131,6 +135,7 @@ fileread(struct file *f, uint64 addr, int n)
 
 // Write to file f.
 // addr is a user virtual address.
+// sys_write调用它
 int
 filewrite(struct file *f, uint64 addr, int n)
 {

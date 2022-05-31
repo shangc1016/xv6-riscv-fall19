@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
 /*
  * the kernel's page table.
  */
@@ -177,6 +178,9 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // Remove mappings from a page table. The mappings in
 // the given range must exist. Optionally free the
 // physical memory.
+// 把虚拟空间地址从vm开始，大小为size的进程映射内存解除映射，Z这个区间中的进程页面必须都是有效的；
+// 因为使用了lazy alloctor的方式，可能myproc()->sz =0x4008，但是只分配了4个页面，第五个页面还没分配，
+// 但是这个函数，解除映射的区间是0x0 - 0x4008，所以他认为最后的第五个页表映射也是存在的，导致panic；
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
 {
@@ -188,10 +192,17 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+    // panic("uvmunmap: walk");
+    // 解除映射这个函数默认在vm <--> vm + size 这个区间的所有虚地址都是有效的，
+    // 但是采用lazy的方法导致虚地址空间有hole，
+    // 遇到这种情况，就继续解除下一个pte的映射关系就行。
+      goto done;
     if((*pte & PTE_V) == 0){
-      printf("va=%p pte=%p\n", a, *pte);
-      panic("uvmunmap: not mapped");
+    // pte没有PTE_V标记，视为没有做映射
+      goto done;
+
+    //   printf("va=%p pte=%p\n", a, *pte);
+    //   panic("uvmunmap: not mapped");
     }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
@@ -199,7 +210,8 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
       pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
-    *pte = 0;
+done:
+    if(pte != 0) *pte = 0;
     if(a == last)
       break;
     a += PGSIZE;
@@ -295,7 +307,8 @@ freewalk(pagetable_t pagetable)
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
-      panic("freewalk: leaf");
+      pagetable[i] = 0;
+    //   panic("freewalk: leaf");
     }
   }
   kfree((void*)pagetable);
@@ -306,7 +319,9 @@ freewalk(pagetable_t pagetable)
 void
 uvmfree(pagetable_t pagetable, uint64 sz)
 {
+  // 根据页表，解除映射关系，并且释放物理内存
   uvmunmap(pagetable, 0, sz, 1);
+  // 释放页表元数据
   freewalk(pagetable);
 }
 
@@ -325,15 +340,24 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
+    // walk函数拿到第i个虚地址对应的pte，
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+    //   panic("uvmcopy: pte should exist");
+      continue;
+    // 一个进程所持有的pte必须是有效的，
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
+    //   panic("uvmcopy: page not present");
+    //   continue;
+    // 找到物理地址，以及标记位
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+    // 为新的进程创建物理页面
     if((mem = kalloc()) == 0)
       goto err;
+    // 复制物理页面的内容
     memmove(mem, (char*)pa, PGSIZE);
+    // 做虚地址映射，mem映射到new页表的pte相同位置
     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
       kfree(mem);
       goto err;
@@ -362,16 +386,36 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
+// dstva就是read到的目的地，是用户进程空间的地址
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
-
+  struct proc *p = myproc();
+//   if(dstva + len > p->sz){
+//       p->killed = 1;
+//       exit(0);
+//   }
+  
+//   printf("==vaddr=%p\n", dstva);
+  
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0){
+      if(va0 > p->sz){
+          p->killed = 1;
+          return -1;
+      }
+     
+      if(uvmlazyalloc(pagetable, va0) == -1){
+          // kalloc物理内存分配失败
+          p->killed = 1;
+          return -1;
+      }
+      pa0 = walkaddr(pagetable, va0);
+    }
+    //   return -1;
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -387,16 +431,35 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
+// srcva 是用户进程空间的地址
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
+  struct proc *p = myproc();
+//   if(srcva + len > p->sz){
+//       p->killed = 1;
+//       exit(0);
+//   }
+//   printf("==vaddr=%p\n", srcva);
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0){
+    
+      if(va0 > p->sz){
+          p->killed = 1;
+          return -1;
+      }
+      if(uvmlazyalloc(pagetable, va0) == -1){
+          // kalloc物理内存分配失败
+          p->killed = 1;
+          return -1;
+      }
+      pa0 = walkaddr(pagetable, va0);
+    }
+    //   return -1;
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -454,26 +517,51 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 
 
+
 void vmprint_level(pagetable_t pagetable, int level) {
-
     for(int i = 0; i < 512; i++){
-        uint64 pte = pagetable[i];
-
-        // 如果pte条目有效
-        if((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0){
-            // 打印pte
+        pte_t pte = pagetable[i];
+        // 前两级页表因为还有包括下一级也表地址，不能明确知道单个具体页表的权限，所以非叶子页表具有读写执行所有权限
+        if((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+            for(int j = 0; j < level; j++) printf(" ..");
+            // pte有效，也表示个三级翻译机制，需要翻译三次
+            // 根据pte得到物理地址，物理地址指向的地方又是一个pagetable
             uint64 child = PTE2PA(pte);
-            for(int j=0; j< level; j++) printf(".. ");
-            printf("..%d: pte %p pa %p\n",i , pte, child);
+            printf(" ..%d: pte %p pa %p\n", i, pte, child);
             vmprint_level((pagetable_t)child, level + 1);
-        } else if(pte & PTE_V){
-            // 到达第三级页表，也就是叶子
-            printf(".. .. ..%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+        } else if (pte & PTE_V) {
+            // 叶子，走到页表的最后一级，也就是第三级了
+            printf(" .. .. ..%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
         }
     }
+}   
+
+// 打印进程的页表映射
+void vmprint(pagetable_t pagetable) {
+    vmprint_level(pagetable, 0);
+    // 为啥打印的结果pte和pa这么相似呢，因为都是64位的。但具体含义不同。
+    // pa是物理地址；pte是地址转换映射表，不是地址；
+    // PTE_V 这个标记位标记这个pte是不是有效的，这个意思就是说这个pte是否包含有效的地址转换
+    // 前两级page table的标志位是PTE_R、PTE_W、PTE_X全部都有的
 }
 
+// 在这之前要先判断能不能分配
+// 这个函数在lazy的方式下真正的分配内存
+int uvmlazyalloc(pagetable_t pagetable, uint64 vm){
 
-void vmprint(pagetable_t pagetable){
-    vmprint_level(pagetable, 0);
+    // 分配物理页面
+    char  *mem = kalloc();
+    if(mem == 0){
+        return -1;
+    }
+    // 初始化物理页面
+    memset(mem, 0, PGSIZE);
+
+    vm = PGROUNDDOWN(vm);
+    if(mappages(pagetable, vm, PGSIZE, (uint64)mem, PTE_U | PTE_W | PTE_R | PTE_X) != 0){
+        kfree(mem);
+        return -1;
+    }
+    return 0;
+    // 返回值为-1，有三种情况，vm越界，物理内存耗尽。这种情况杀死进程
 }

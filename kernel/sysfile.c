@@ -248,7 +248,6 @@ create(char *path, short type, short major, short minor)
     return 0;
 
   ilock(dp);
-
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
@@ -257,10 +256,8 @@ create(char *path, short type, short major, short minor)
     iunlockput(ip);
     return 0;
   }
-
   if((ip = ialloc(dp->dev, type)) == 0)
     panic("create: ialloc");
-
   ilock(ip);
   ip->major = major;
   ip->minor = minor;

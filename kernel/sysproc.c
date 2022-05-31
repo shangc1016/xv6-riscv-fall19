@@ -47,8 +47,31 @@ sys_sbrk(void)
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  struct proc *p = myproc();
+
+  // 增加之后的地址比MAXVA大，出错
+  if(n + p->sz > MAXVA){
+      goto ret;
+  }
+  if(n > 0){
+      // 扩张内存，lazy分配
+      p->sz += n;
+  } else if(n < 0){
+      // 收缩内存，直接解除映射，删除物理页面
+      uint sz = p->sz;
+      uint64 sp = p->tf->sp;
+      // 收缩的比栈小，出错
+      if(sz + n < sp) {
+          goto ret;
+      }
+      // 解除映射
+      sz = uvmdealloc(p->pagetable, sz, sz + n);
+      p->sz = sz;
+  }
+
+//   if(growproc(n) < 0)
+//     return -1;
+ret:
   return addr;
 }
 

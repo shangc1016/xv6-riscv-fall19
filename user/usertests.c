@@ -790,6 +790,7 @@ createdelete(char *s)
   char name[32];
 
   for(pi = 0; pi < NCHILD; pi++){
+    // 四个子进程
     pid = fork();
     if(pid < 0){
       printf("fork failed\n", s);
@@ -818,7 +819,6 @@ createdelete(char *s)
       exit(0);
     }
   }
-
   int xstatus;
   for(pi = 0; pi < NCHILD; pi++){
     wait(&xstatus);
@@ -1924,6 +1924,7 @@ void argptest(char *s)
     printf("%s: open failed\n", s);
     exit(1);
   }
+  // 这是直接访问了一个错误的内存地址，read的第三个参数是个unsigned数，导致内存越界
   read(fd, sbrk(0) - 1, -1);
   close(fd);
 }
@@ -1970,6 +1971,7 @@ pgbug(char *s)
 {
   char *argv[1];
   argv[0] = 0;
+  // 直接给了一个野指针
   exec((char*)0xeaeb0b5b00002f5e, argv);
 
   pipe((int*)0xeaeb0b5b00002f5e);
