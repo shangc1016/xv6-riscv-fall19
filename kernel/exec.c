@@ -119,12 +119,6 @@ exec(char *path, char **argv)
   p->tf->a1 = sp;
 
 
-  if(strncmp(p->name, "initcode", sizeof(p->name)) == 0){
-      printf("page table %p\n", pagetable);
-      vmprint(pagetable);
-  }
-
-
   // Save program name for debugging.
   // 设置进程的名字等信息用来debug
   for(last=s=path; *s; s++)
