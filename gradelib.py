@@ -403,7 +403,7 @@ class Runner():
         should be a list of additional arguments to pass to make.  The
         timeout argument bounds how long to run before returning."""
 
-        def run_qemu_kw(target_base="qemu", make_args=[], timeout=200):
+        def run_qemu_kw(target_base="qemu", make_args=[], timeout=100):
             return target_base, make_args, timeout
         target_base, make_args, timeout = run_qemu_kw(**kw)
 
@@ -574,7 +574,7 @@ def shell_script(script, terminate_match=None):
         def handle_output(output):
             context.buf.extend(output)
             if terminate_match is not None:
-                if re.match(terminate_match, context.buf.decode('utf-8', 'replace')):
+                if re.match(terminate_match, context.buf.decode('utf-8')):
                     raise TerminateTest
             if b'$ ' in context.buf:
                 context.buf = bytearray()
