@@ -75,6 +75,7 @@ sys_read(void)
 
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+  
   return fileread(f, p, n);
 }
 
@@ -414,7 +415,8 @@ sys_exec(void)
   uint64 uargv, uarg;
 
   if(argstr(0, path, MAXPATH) < 0 || argaddr(1, &uargv) < 0){
-    return -1;
+    myproc()->killed = 1;
+    exit(0);
   }
   memset(argv, 0, sizeof(argv));
   for(i=0;; i++){

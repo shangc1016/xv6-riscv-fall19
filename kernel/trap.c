@@ -81,14 +81,14 @@ usertrap(void)
       // mappages(pg, true_vm_end);
       // end.
     uint64 vm = r_stval();
-    if(vm > p->sz){
+    if(vm >= p->sz){
         p->killed = 1;
         goto killed;
     }
       
     // 只要访问地址小于sp栈地址，就说明访问越界了，
     uint64 sp = p->tf->sp;
-    if(vm < sp){
+    if(vm < PGROUNDUP(sp)){
         p->killed = 1;
         goto killed;
     }

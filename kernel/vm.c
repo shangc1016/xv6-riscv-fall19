@@ -387,35 +387,43 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
 // dstva就是read到的目的地，是用户进程空间的地址
+// 对应read系统调用，数据从内核到用户空间
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
   struct proc *p = myproc();
-//   if(dstva + len > p->sz){
-//       p->killed = 1;
-//       exit(0);
+//   int flag = 0;
+//   if(dstva == 0xefff) {
+//       flag = 1;
 //   }
-  
-//   printf("==vaddr=%p\n", dstva);
-  
+
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    // 首先，根据用户空间的虚拟地址进行地址翻译，得到物理地址
     pa0 = walkaddr(pagetable, va0);
+    // 如果不存在这个物理地址，说明这个虚拟地址没有页表对应项，即没有分配物理内存。
+    // 对于read偏移是进程sz-1的情况，pa0是有效的，
+   
     if(pa0 == 0){
-      if(va0 > p->sz){
+    
+      // 如果是访问的进程虚拟地址大于进程的sz，说明访问地址越界，直接杀死进程
+      if(dstva >= p->sz){
           p->killed = 1;
           return -1;
       }
      
+      // 有可能是因为lazy机制，还未真正分配，那么就分配新的页面，并且映射到进程虚拟地址处；
       if(uvmlazyalloc(pagetable, va0) == -1){
-          // kalloc物理内存分配失败
+          // uvmlazyalloc返回-1说明kalloc物理内存分配失败
           p->killed = 1;
           return -1;
       }
+      // 重新做页表映射，这一次得到了有效的pa
       pa0 = walkaddr(pagetable, va0);
     }
     //   return -1;
+    // dstva - va0 是目标地址在一页中的偏移
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -437,26 +445,21 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
   struct proc *p = myproc();
-//   if(srcva + len > p->sz){
-//       p->killed = 1;
-//       exit(0);
-//   }
-//   printf("==vaddr=%p\n", srcva);
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0){
-    
-      if(va0 > p->sz){
+      if(va0 >= p->sz){
           p->killed = 1;
           return -1;
       }
       if(uvmlazyalloc(pagetable, va0) == -1){
-          // kalloc物理内存分配失败
+          // uvmlazyalloc返回-1说明kalloc物理内存分配失败
           p->killed = 1;
           return -1;
       }
+      // 重新做页表映射，这一次得到了有效的pa
       pa0 = walkaddr(pagetable, va0);
     }
     //   return -1;

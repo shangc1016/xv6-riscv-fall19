@@ -1926,6 +1926,7 @@ void argptest(char *s)
   }
   // 这是直接访问了一个错误的内存地址，read的第三个参数是个unsigned数，导致内存越界
   read(fd, sbrk(0) - 1, -1);
+  printf("close fd\n");
   close(fd);
 }
 

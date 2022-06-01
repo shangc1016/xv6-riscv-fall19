@@ -115,6 +115,15 @@ fileread(struct file *f, uint64 addr, int n)
   if(f->readable == 0)
     return -1;
 
+//   if(n == -1){
+//       printf("n == -1\n");
+//       printf("sp = %p\n", myproc()->tf->sp);
+//       printf("sp roundup = %p\n", PGROUNDUP(myproc()->tf->sp));
+//       printf("sz = %p\n", myproc()->sz);
+//       printf("addr = %p\n", addr);
+//   }
+  
+
   if(f->type == FD_PIPE){
     r = piperead(f->pipe, addr, n);
   } else if(f->type == FD_DEVICE){
@@ -122,14 +131,17 @@ fileread(struct file *f, uint64 addr, int n)
       return -1;
     r = devsw[f->major].read(f, 1, addr, n);
   } else if(f->type == FD_INODE){
+    // 这儿有锁!!!
     ilock(f->ip);
     if((r = readi(f->ip, 1, addr, f->off, n)) > 0)
       f->off += r;
     iunlock(f->ip);
+    if(r == -1){
+        exit(0);
+    }
   } else {
     panic("fileread");
   }
-
   return r;
 }
 

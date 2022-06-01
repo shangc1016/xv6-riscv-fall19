@@ -360,6 +360,7 @@ exit(int status)
   // acquired any other proc lock. so wake up init whether that's
   // necessary or not. init may miss this wakeup, but that seems
   // harmless.
+  // 唤醒initproc进程，initproc进程就是initcode进程
   acquire(&initproc->lock);
   wakeup1(initproc);
   release(&initproc->lock);
