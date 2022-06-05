@@ -338,7 +338,11 @@ sfence_vma()
 
 #define PTE2PA(pte) (((pte) >> 10) << 12)
 
+// 得到一个pte条目中的flag，包括，R(read)、W(write)、X(execute)、U(user)、V(valid)
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
+// 增加一个宏，取出一个PTE中的RSW，一个PTE有64bit，RSW为第8、9位；
+#define PTE_RSW(pte) (((pte) >> 8) << 62)
+// 如果先左移，再右移；可能会因为左移之后最高位是1而导致最高位填充1
 
 // extract the three 9-bit page table indices from a virtual address.
 #define PXMASK          0x1FF // 9 bits

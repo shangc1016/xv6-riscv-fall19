@@ -152,19 +152,24 @@ kvmpa(uint64 va)
 // physical addresses starting at pa. va and size might not
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
+// 此时的mappages还不能支持重复的映射，但是COW机制需要一个物理页面、
+// 不对，这个的不能重复映射指的是，不能把什么内存映射到同一个进程虚拟地址上，和COW要涉及到的重复映射不一样
 int
 mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 {
   uint64 a, last;
   pte_t *pte;
 
-  a = PGROUNDDOWN(va);
-  last = PGROUNDDOWN(va + size - 1);
+  a = PGROUNDDOWN(va); // 起始va
+  last = PGROUNDDOWN(va + size - 1);  // 终止va
   for(;;){
+    // 根据va，找到对应的pte；这儿的1表示如果pte不存在，就分配相应的页表物理页面
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
+    // 检查PTE_V标记确保是首次映射
     if(*pte & PTE_V)
       panic("remap");
+    // 如果是首次映射，那么就加上PTE_V标记
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -316,29 +321,56 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
+// 拷贝old页表到new页表，old页表的有map的大小是sz
+// pagetable_t数据类型也就是uint64的指针
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 pa, i;
-  uint flags;
+  uint64 pa, i, mask;
+  uint flags, rsw;
   char *mem;
-
+  // sz是字节大小，页表是以PGSIZE为单位的
   for(i = 0; i < sz; i += PGSIZE){
+    // walk函数找到第i个虚地址对应的物理地址，第三个参数为0表示如果这个PTE不存在，就不用kalloc实际分配了
+    // 在sz以内的PTE应该都是映射过的，因此如果pte是0，表示没有映射，直接panic
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
+    // 如果这个pte没有PTE_V标记，表示这条pte无效，也panic
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    // 根据pte找到这一页的物理地址pa，这个pa是old页表一个pte映射的物理地址，
     pa = PTE2PA(*pte);
+    // COW：开始
+    // 1、通过位运算，去掉pte的PTE_W标志位
+    mask = 0xffffffffffffffff - PTE_W;
+    *pte = (pte_t)((uint64)*pte & mask);
+    // 2、得到这一条pte的flag标记
     flags = PTE_FLAGS(*pte);
+    // 3、设置每个pte项的RSW为1，表示另外有一个进程同时在使用这个pte；当RSW为0的时候表示pte只有当前进程拥有，
+    rsw = PTE_RSW(*pte);                         // 取出pte中的rsw
+    rsw = rsw + 1;                               // 给rsw加一，表示这个pte的引用数，因为最开始rsw没有使用，是0，所以正好
+    rsw = rsw << 8;                              // rsw只有两位，可取值0，1，2，3；然后左移8位，刚好和rsw在pte中的位置保持一致
+    mask = 0xffffffffffffffff - 0x3ff + rsw;     // mask就是把rsw加进去
+    *pte = (pte_t)((uint64)*pte * mask);         // 通过位运算，更新pte
+    
+
+    /* lab-cow original
+    // 分配一个物理页面mem
     if((mem = kalloc()) == 0)
       goto err;
+    // 初始化物理页面，把old页面拷贝到new页表的页面中
     memmove(mem, (char*)pa, PGSIZE);
+    // 映射到新页表的相同位置，mappages参数(新页表基地址，vm，sz，pa，flags)；
     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
       kfree(mem);
       goto err;
     }
+    */
   }
+  // 4、直接把new页表基地址设置为old的地址
+  new = old;
+  // COW：结束
   return 0;
 
  err:

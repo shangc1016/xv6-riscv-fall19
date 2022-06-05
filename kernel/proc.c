@@ -94,7 +94,8 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
+  // 首先在全局的proc数组中找到一个空闲的，找不到就出错返回了。
+  // 这个数组就表示了xv6中支持的最大进程数量。
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -106,15 +107,18 @@ allocproc(void)
   return 0;
 
 found:
+  // 找到了空闲进程p，就分配一个pid
   p->pid = allocpid();
 
   // Allocate a trapframe page.
+  // 分配一个物理页面，并设置为进程的trapframe中断现场帧
   if((p->tf = (struct trapframe *)kalloc()) == 0){
     release(&p->lock);
     return 0;
   }
 
   // An empty user page table.
+  // 设置号进程的页表，此时进程页表只有两个PTE、一个trapframe的；一个trampoline的
   p->pagetable = proc_pagetable(p);
 
   // Set up new context to start executing at forkret,
@@ -156,16 +160,19 @@ proc_pagetable(struct proc *p)
   pagetable_t pagetable;
 
   // An empty page table.
+  // 先创建一个页表页面，kalloc
   pagetable = uvmcreate();
 
   // map the trampoline code (for system call return)
   // at the highest user virtual address.
   // only the supervisor uses it, on the way
   // to/from user space, so not PTE_U.
+  //把trampoline页面映射到地址空间最高处
   mappages(pagetable, TRAMPOLINE, PGSIZE,
            (uint64)trampoline, PTE_R | PTE_X);
 
   // map the trapframe just below TRAMPOLINE, for trampoline.S.
+  // 把tramframe中断现场帧映射到进程地址次高处，这块物理内存是所有用户进程共享的，所以不用kalloc物理内存
   mappages(pagetable, TRAPFRAME, PGSIZE,
            (uint64)(p->tf), PTE_R | PTE_W);
 
@@ -247,31 +254,39 @@ int
 fork(void)
 {
   int i, pid;
-  struct proc *np;
+  struct proc *np;   // np的意思是new proc，指的是新初始化的子进程
   struct proc *p = myproc();
 
   // Allocate process.
+  // 初始化一个进程，
+  // 此时进程页表中只包括两个PTE页表项，trapframe以及trampoline
   if((np = allocproc()) == 0){
     return -1;
   }
 
   // Copy user memory from parent to child.
+  // 把父进程的页表拷贝到子进程
+  // lab主要涉及这个
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
+  // 设置子进程的sz
   np->sz = p->sz;
-
+  // 设置子进程的父进程
   np->parent = p;
 
   // copy saved user registers.
+  // 拷贝父进程的中断帧，tf寄存器
   *(np->tf) = *(p->tf);
 
   // Cause fork to return 0 in the child.
+  // 设置子进程np的系统调用返回值为0
   np->tf->a0 = 0;
 
   // increment reference counts on open file descriptors.
+  // 复制父进程的打开文件
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
@@ -282,9 +297,9 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
-
+  // 释放锁，然后np进程就处于可执行状态，等待调度
   release(&np->lock);
-
+  // 父进程fork系统调用返回值是子进程号pid
   return pid;
 }
 
