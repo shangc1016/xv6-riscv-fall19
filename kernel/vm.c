@@ -295,11 +295,14 @@ freewalk(pagetable_t pagetable)
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
     if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // 这个条件判断出了最后一级pte页表，最后一级不但有PTE_V标志位，还有PTE_W、PTE_X等标志位
+      // 而中间页表只有PTE_V标记
       // this PTE points to a lower-level page table.
       uint64 child = PTE2PA(pte);
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
+      // 这个就是中间页表，不是三级页表的最后一级
       panic("freewalk: leaf");
     }
   }
@@ -327,9 +330,9 @@ int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 pa, i, mask;
-  uint flags, rsw;
-  char *mem;
+  uint64 i, mask;
+  uint rsw;
+//   char *mem;
   // sz是字节大小，页表是以PGSIZE为单位的
   for(i = 0; i < sz; i += PGSIZE){
     // walk函数找到第i个虚地址对应的物理地址，第三个参数为0表示如果这个PTE不存在，就不用kalloc实际分配了
@@ -340,20 +343,22 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     // 根据pte找到这一页的物理地址pa，这个pa是old页表一个pte映射的物理地址，
-    pa = PTE2PA(*pte);
+    // 也不需要得到pte对应的物理地址了，
+    // pa = PTE2PA(*pte);
     // COW：开始
     // 1、通过位运算，去掉pte的PTE_W标志位
     mask = 0xffffffffffffffff - PTE_W;
     *pte = (pte_t)((uint64)*pte & mask);
     // 2、得到这一条pte的flag标记
-    flags = PTE_FLAGS(*pte);
+    // 不需要mappages了，也就不用flags
+    // flags = PTE_FLAGS(*pte);
     // 3、设置每个pte项的RSW为1，表示另外有一个进程同时在使用这个pte；当RSW为0的时候表示pte只有当前进程拥有，
     rsw = PTE_RSW(*pte);                         // 取出pte中的rsw
     rsw = rsw + 1;                               // 给rsw加一，表示这个pte的引用数，因为最开始rsw没有使用，是0，所以正好
     rsw = rsw << 8;                              // rsw只有两位，可取值0，1，2，3；然后左移8位，刚好和rsw在pte中的位置保持一致
     mask = 0xffffffffffffffff - 0x3ff + rsw;     // mask就是把rsw加进去
     *pte = (pte_t)((uint64)*pte * mask);         // 通过位运算，更新pte
-    
+    // COW：结束
 
     /* lab-cow original
     // 分配一个物理页面mem
@@ -370,12 +375,13 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   }
   // 4、直接把new页表基地址设置为old的地址
   new = old;
-  // COW：结束
   return 0;
 
- err:
-  uvmunmap(new, 0, i, 1);
-  return -1;
+// 这个情况应该不会发生
+//  err:
+//   // 直接把进程所有的页表映射全部删除
+//   uvmunmap(new, 0, i, 1);
+//   return -1;
 }
 
 // mark a PTE invalid for user access.

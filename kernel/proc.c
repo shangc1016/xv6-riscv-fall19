@@ -278,7 +278,7 @@ fork(void)
   np->parent = p;
 
   // copy saved user registers.
-  // 拷贝父进程的中断帧，tf寄存器
+  // 拷贝父进程的中断帧，tf寄存器吗，这个应该是一页内存呀，怎么这么拷贝
   *(np->tf) = *(p->tf);
 
   // Cause fork to return 0 in the child.
