@@ -34,7 +34,7 @@ exec(char *path, char **argv)
     goto bad;
   if(elf.magic != ELF_MAGIC)
     goto bad;
-
+  // 得到最基础的进程页表，只有trapframe以及trampoline两个PTE
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
@@ -49,10 +49,12 @@ exec(char *path, char **argv)
       goto bad;
     if(ph.vaddr + ph.memsz < ph.vaddr)
       goto bad;
+    // 先根据ELF文件中的每个段(数据段，代码段等)的大小，在进程也标的相应位置分配相应大小的内存
     if((sz = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
+    // 然后把ELF文件中的某个段读到进程虚地址内存中
     if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
       goto bad;
   }
@@ -65,6 +67,7 @@ exec(char *path, char **argv)
 
   // Allocate two pages at the next page boundary.
   // Use the second as the user stack.
+  // 再分配额外的两页，作为栈，以及栈保护页面
   sz = PGROUNDUP(sz);
   if((sz = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
@@ -73,6 +76,7 @@ exec(char *path, char **argv)
   stackbase = sp - PGSIZE;
 
   // Push argument strings, prepare rest of stack in ustack.
+  // 根据exec的参数，把相应数据压到栈中
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
       goto bad;
@@ -106,6 +110,7 @@ exec(char *path, char **argv)
   safestrcpy(p->name, last, sizeof(p->name));
     
   // Commit to the user image.
+  // 替换所构造的进程页表
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
   p->sz = sz;

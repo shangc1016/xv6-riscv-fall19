@@ -460,11 +460,14 @@ sys_pipe(void)
   int fd0, fd1;
   struct proc *p = myproc();
 
+  // sys_pipe 的参数，也就是管道读写的两端
   if(argaddr(0, &fdarray) < 0)
     return -1;
+  // 创建pipe结构体，也就是缓存数据的地方；然后分配两个打开文件，和pipe建立连接
   if(pipealloc(&rf, &wf) < 0)
     return -1;
   fd0 = -1;
+  // fdalloc分配文件描述符，和上面的打开文件建立联系
   if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
     if(fd0 >= 0)
       p->ofile[fd0] = 0;

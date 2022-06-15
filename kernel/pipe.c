@@ -26,6 +26,7 @@ pipealloc(struct file **f0, struct file **f1)
 
   pi = 0;
   *f0 = *f1 = 0;
+  // filealloc 就是从全局的打开文件中，获得一个file结构体，
   if((*f0 = filealloc()) == 0 || (*f1 = filealloc()) == 0)
     goto bad;
   if((pi = (struct pipe*)kalloc()) == 0)
@@ -35,6 +36,9 @@ pipealloc(struct file **f0, struct file **f1)
   pi->nwrite = 0;
   pi->nread = 0;
   initlock(&pi->lock, "pipe");
+  // 然后设置这两个打开文件的参数
+  // type 设置成FD_PIPE
+  // 两个文件分别设置成只读、只写模式
   (*f0)->type = FD_PIPE;
   (*f0)->readable = 1;
   (*f0)->writable = 0;

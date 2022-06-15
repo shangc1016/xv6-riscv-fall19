@@ -154,6 +154,7 @@ freeproc(struct proc *p)
 
 // Create a page table for a given process,
 // with no user pages, but with trampoline pages.
+// 构造最初的进程页表，只有trapframe和trampoline
 pagetable_t
 proc_pagetable(struct proc *p)
 {
@@ -259,10 +260,12 @@ fork(void)
 
   // Allocate process.
   // 初始化一个进程，
-  // 此时进程页表中只包括两个PTE页表项，trapframe以及trampoline
+  // 此时进程页表中只包括两个PTE页表项，trapframe以及trampoline,
+  // 构造进程最初的样子，已经具有页表了，里面只有两个页面映射
   if((np = allocproc()) == 0){
     return -1;
   }
+  // TODO：需要在这儿把np进程的页表释放，因为在uvmcopy中实际上直接把old赋值给了new，需要提前释放new
 
   // Copy user memory from parent to child.
   // 把父进程的页表拷贝到子进程
@@ -272,6 +275,7 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+
   // 设置子进程的sz
   np->sz = p->sz;
   // 设置子进程的父进程
@@ -336,7 +340,7 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
-
+  // 系统中启动的第二个用户进程就是init，init的启动不能出错，否则直接panic
   if(p == initproc)
     panic("init exiting");
 
@@ -410,6 +414,7 @@ wait(uint64 addr)
 
   for(;;){
     // Scan through table looking for exited children.
+    // 扫描整个进程数组，看哪一个是当前进程的子进程，如果有子进程退出，就从休眠中唤醒
     havekids = 0;
     for(np = proc; np < &proc[NPROC]; np++){
       // this code uses np->parent without holding np->lock.
@@ -420,15 +425,19 @@ wait(uint64 addr)
         // because only the parent changes it, and we're the parent.
         acquire(&np->lock);
         havekids = 1;
+        // 得到了ZOMBIE状态的子进程
         if(np->state == ZOMBIE){
           // Found one.
+          // 找到了一个退出的子进程
           pid = np->pid;
+          // 把子进程的xstate退出状态写到wait参数地址处
           if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
                                   sizeof(np->xstate)) < 0) {
             release(&np->lock);
             release(&p->lock);
             return -1;
           }
+          // 然后释放子进程内存空间
           freeproc(np);
           release(&np->lock);
           release(&p->lock);

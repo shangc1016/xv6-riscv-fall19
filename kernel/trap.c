@@ -68,8 +68,29 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else if(r_scause() == 13 || r_scause() == 15){
-      printf("===mem panic\n");
+    
+      // 因为在fork系统调用中，子进程的页表映射到了父进程的物理页面，而且去掉了父子进程中的pte项的PTE_W标志位，
+      // 在进程写操作的时候，没有PTE_W标志位导致发生了trap，进入S-mode执行，就到这儿了。
+      
+      // 父子进程谁先陷入到这儿是不一定的
+
+      struct proc *p = myproc();
+    //   vmprint(p->pagetable);
+    //   printf("stval = %p\n", r_stval());
+    //   printf("page fault, pid = %d, name = %s\n", p->pid, p->name);
+      uint64 vm = PGROUNDDOWN(r_stval());
+    
+      // 由cowalloc处理cow机制的trap，也就是说要从COW机制中恢复出来，真正分配自己独占的物理页面
+      int ret = cowalloc(p->pagetable, vm);
+      if(ret == -1){
+          p->killed = 1;
+      }
+    //   vmprint(p->pagetable);
+   
   } else {
+    // vmprint(p->pagetable);
+    // printf("scause = %p\n", r_scause());
+    // printf("pname = %s\n", p->name);
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

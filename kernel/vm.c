@@ -17,6 +17,8 @@ extern char trampoline[]; // trampoline.S
 
 void print(pagetable_t);
 
+// page reference count start
+extern uint64 PGREFSTART;
 /*
  * create a direct-map page table for the kernel and
  * turn on paging. called early, in supervisor mode.
@@ -63,6 +65,11 @@ kvminithart()
   sfence_vma();
 }
 
+
+
+
+
+
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
@@ -79,7 +86,8 @@ static pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
-    panic("walk");
+    return 0;
+    // panic("walk");
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -116,6 +124,64 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
   pa = PTE2PA(*pte);
   return pa;
+}
+
+
+//// ========== LAB COW ======
+// pte_t *cow_pte(pagetable_t pagetable, uint64 va, int alloc){
+//     return walk(pagetable, va, alloc);
+// }
+
+// 父子进程共享页表，这个函数真正给子进程分配独立的物理页面，并且重新设置va->pa的映射
+//  能进到这个函数，说明是因为COW的原因，那么进程的va地址对应的应该是COW
+int cowalloc(pagetable_t pagetable, uint64 va){
+    uint64 pa;
+    uint flags;
+    // printf("===enter cowalloc, va = %p\n", va);
+    pte_t *pte = walk(pagetable, va, 0);
+    if(pte == 0){
+        return -1;
+    }
+    pa = PTE2PA(*pte);
+    // printf("ppte = %p\n", *pte);
+    // printf("pa = %p\n", pa);
+    uint64 refcount = PGREFSTART + (pa - PGREFSTART) / PGSIZE;
+    // printf("refcount = %d\n", *(uint8*)refcount);
+    
+    flags = PTE_FLAGS(*pte);
+    
+    // 既然已经是COW了，那就没有PTE_W、同时RSW位是有效的
+    // 如果没有RSW标志位、同时还有PTE_W标志位。就说明这个不是COW的进程地址空间的地址，然后直接返回-1，出去之后被kill
+    if((flags & PTE_W) || !(flags & PTE_RSW)){
+        printf("==error\n");
+        return -1;
+    }
+    flags += PTE_W;     // 加上PTE_W
+    flags -= 0x100;     // 去掉rsw中的标志位，
+
+    
+    if(*(uint8*)refcount > 0){
+
+        char *mem = (char*)kalloc();
+        if(mem == 0){
+            return -1;
+        }
+        memmove(mem, (void*)pa, PGSIZE);
+        // 把refcount减一，
+        // pte加上PTE_W标志位，去掉rsw中的标志位
+        // 重新映射pte到mem
+        uvmunmap(pagetable, va, PGSIZE, 1);
+        mappages(pagetable, va, PGSIZE, (uint64)mem, flags);
+
+    }else if(*(uint8*)refcount == 0){
+        // 在pte中加上PTE_W的标志位，并且在rsw中去掉标志位，表示现在这个pte不再是cow机制了
+        // printf("pte = %p\n", *pte);
+        *pte = *pte & 0xfffffffffffffc00;  // pte把flags减掉，
+        // printf("pte = %p\n", *pte);
+        *pte += flags;                     // pte把新的flags加上
+        // printf("pte = %p\n", *pte);
+    }
+    return 0;
 }
 
 // add a mapping to the kernel page table.
@@ -242,6 +308,7 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
 
 // Allocate PTEs and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
+// 进程的sz由oldsz变成newsz
 uint64
 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
@@ -253,13 +320,18 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   oldsz = PGROUNDUP(oldsz);
   a = oldsz;
+  // 从oldsz->newsz
+  // 以页面为单位扩容
   for(; a < newsz; a += PGSIZE){
+    // 先kalloc分配物理页面
     mem = kalloc();
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+    // 然后初始化物理内存区域
     memset(mem, 0, PGSIZE);
+    //最后映射到原来的oldsz处
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
@@ -330,9 +402,8 @@ int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 i, mask;
-  uint rsw;
-//   char *mem;
+  uint64 pa, i;
+  uint flags;
   // sz是字节大小，页表是以PGSIZE为单位的
   for(i = 0; i < sz; i += PGSIZE){
     // walk函数找到第i个虚地址对应的物理地址，第三个参数为0表示如果这个PTE不存在，就不用kalloc实际分配了
@@ -343,45 +414,34 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     // 根据pte找到这一页的物理地址pa，这个pa是old页表一个pte映射的物理地址，
-    // 也不需要得到pte对应的物理地址了，
-    // pa = PTE2PA(*pte);
-    // COW：开始
-    // 1、通过位运算，去掉pte的PTE_W标志位
-    mask = 0xffffffffffffffff - PTE_W;
-    *pte = (pte_t)((uint64)*pte & mask);
-    // 2、得到这一条pte的flag标记
-    // 不需要mappages了，也就不用flags
-    // flags = PTE_FLAGS(*pte);
-    // 3、设置每个pte项的RSW为1，表示另外有一个进程同时在使用这个pte；当RSW为0的时候表示pte只有当前进程拥有，
-    rsw = PTE_RSW(*pte);                         // 取出pte中的rsw
-    rsw = rsw + 1;                               // 给rsw加一，表示这个pte的引用数，因为最开始rsw没有使用，是0，所以正好
-    rsw = rsw << 8;                              // rsw只有两位，可取值0，1，2，3；然后左移8位，刚好和rsw在pte中的位置保持一致
-    mask = 0xffffffffffffffff - 0x3ff + rsw;     // mask就是把rsw加进去
-    *pte = (pte_t)((uint64)*pte * mask);         // 通过位运算，更新pte
-    // COW：结束
+    pa = PTE2PA(*pte);
 
-    /* lab-cow original
-    // 分配一个物理页面mem
-    if((mem = kalloc()) == 0)
-      goto err;
-    // 初始化物理页面，把old页面拷贝到new页表的页面中
-    memmove(mem, (char*)pa, PGSIZE);
-    // 映射到新页表的相同位置，mappages参数(新页表基地址，vm，sz，pa，flags)；
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+    flags = PTE_FLAGS(*pte);
+    // 给flags去掉PTE_W，这个判断用来消除多次COW映射
+    if(flags & PTE_W){
+        flags -= PTE_W;
     }
-    */
-  }
-  // 4、直接把new页表基地址设置为old的地址
-  new = old;
-  return 0;
+    // 在flags中的rsw位置上加上引用次数
+    if(!(flags & PTE_RSW)){
+        flags += PTE_RSW;
+    }
+    *pte = *pte & 0xfffffffffffffc00;  // pte把原来的flags减掉，
+    *pte += flags;                     // pte把新的flags加上
+    
+    // 映射到新页表的相同位置，mappages参数(新页表基地址，vm，sz，pa，flags)；
+    // 在此处构造新的页表new的时候，使用的pte的标志位就是最新的标志位(已经去掉了PTE_W、并且在RSW位置已经增加了0x100)
+    // 在这儿映射虚拟内存，使用的还是相同的物理地址；在影射之前把这块物理内存的引用数加一
 
-// 这个情况应该不会发生
-//  err:
-//   // 直接把进程所有的页表映射全部删除
-//   uvmunmap(new, 0, i, 1);
-//   return -1;
+    // refcount地址就是物理内存pa所对应的引用计数的地址
+    uint64 refcount = PGREFSTART + (pa - PGREFSTART) / PGSIZE;
+    // 然后对这个索引计数加一
+    (*(uint8*)refcount)++;
+    // 最后再map到新的页表中
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      return -1;
+    }
+  }
+  return 0;
 }
 
 // mark a PTE invalid for user access.
@@ -400,6 +460,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
+// 把数据从内核态拷贝到用户态
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
@@ -407,6 +468,18 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    // 1、根据va得到页表中的pte
+    pte_t *pte = walk(pagetable, va0, 0);
+    if(pte == 0){
+        return -1;
+    }
+    // 通过判断pte中的rsw位，判断这个地址是不是COW机制
+    uint flags = PTE_FLAGS(*pte);
+    if(flags & 0x300){
+        cowalloc(pagetable, va0);
+    }
+
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
@@ -488,4 +561,33 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+
+
+void vmprint_level(pagetable_t pagetable, int level) {
+    for(int i = 0; i < 512; i++){
+        pte_t pte = pagetable[i];
+        // 前两级页表因为还有包括下一级也表地址，不能明确知道单个具体页表的权限，所以非叶子页表具有读写执行所有权限
+        if((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+            for(int j = 0; j < level; j++) printf(" ..");
+            // pte有效，也表示个三级翻译机制，需要翻译三次
+            // 根据pte得到物理地址，物理地址指向的地方又是一个pagetable
+            uint64 child = PTE2PA(pte);
+            printf(" ..%d: pte %p pa %p\n", i, pte, child);
+            vmprint_level((pagetable_t)child, level + 1);
+        } else if (pte & PTE_V) {
+            // 叶子，走到页表的最后一级，也就是第三级了
+            printf(" .. .. ..%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+        }
+    }
+}   
+
+// 打印进程的页表映射
+void vmprint(pagetable_t pagetable) {
+    vmprint_level(pagetable, 0);
+    // 为啥打印的结果pte和pa这么相似呢，因为都是64位的。但具体含义不同。
+    // pa是物理地址；pte是地址转换映射表，不是地址；
+    // PTE_V 这个标记位标记这个pte是不是有效的，这个意思就是说这个pte是否包含有效的地址转换
+    // 前两级page table的标志位是PTE_R、PTE_W、PTE_X全部都有的
 }

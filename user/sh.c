@@ -135,6 +135,7 @@ getcmd(char *buf, int nbuf)
 {
   fprintf(2, "$ ");
   memset(buf, 0, nbuf);
+  // gets函数从标准输入读数据，调用了系统调用read
   gets(buf, nbuf);
   if(buf[0] == 0) // EOF
     return -1;
