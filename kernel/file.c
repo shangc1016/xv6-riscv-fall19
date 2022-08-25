@@ -116,6 +116,7 @@ fileread(struct file *f, uint64 addr, int n)
   } else if(f->type == FD_DEVICE){
     if(f->major < 0 || f->major >= NDEV || !devsw[f->major].read)
       return -1;
+    // 1表示需要copy to user拷贝到用户进程空间
     r = devsw[f->major].read(f, 1, addr, n);
   } else if(f->type == FD_INODE){
     ilock(f->ip);

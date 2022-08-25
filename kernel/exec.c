@@ -67,7 +67,7 @@ exec(char *path, char **argv)
 
   // Allocate two pages at the next page boundary.
   // Use the second as the user stack.
-  // 再分配额外的两页，作为栈，以及栈保护页面
+  // 再分配额外的两页，作为用户栈，以及栈保护页面
   sz = PGROUNDUP(sz);
   if((sz = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;

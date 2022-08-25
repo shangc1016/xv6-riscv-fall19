@@ -209,6 +209,7 @@ devintr()
     int irq = plic_claim();
 
     if(irq == UART0_IRQ){
+      // 对应UART设备中断
       uartintr();
     } else if(irq == VIRTIO0_IRQ || irq == VIRTIO1_IRQ ){
       virtio_disk_intr(irq - VIRTIO0_IRQ);

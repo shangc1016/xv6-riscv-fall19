@@ -84,9 +84,11 @@ void
 uartintr(void)
 {
   while(1){
+    // 读UART硬件寄存器映射到内存的相应地址，得到硬件中断的字符数据
     int c = uartgetc();
     if(c == -1)
       break;
+    // UART的中断处理函数最后由consoleintr处理，handler把这个字符写到console设备驱动的buf中
     consoleintr(c);
   }
 }

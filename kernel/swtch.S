@@ -7,7 +7,7 @@
 
 .globl swtch
 swtch:
-        sd ra, 0(a0)
+        sd ra, 0(a0)    # ra是swtch的返回地址
         sd sp, 8(a0)
         sd s0, 16(a0)
         sd s1, 24(a0)

@@ -56,6 +56,7 @@ struct {
   uint w;  // Write index
   uint e;  // Edit index
 } cons;
+// 这个数据结构就是console设备的驱动，其中的buf就是驱动缓存的数据，用于用户进程读写设备
 
 //
 // user write()s to the console go here.
@@ -95,6 +96,7 @@ consoleread(struct file *f, int user_dst, uint64 dst, int n)
   while(n > 0){
     // wait until interrupt handler has put some
     // input into cons.buffer.
+    // 读写位置相同表示没有数据需要读或者写，那就休眠
     while(cons.r == cons.w){
       if(myproc()->killed){
         release(&cons.lock);
@@ -102,7 +104,8 @@ consoleread(struct file *f, int user_dst, uint64 dst, int n)
       }
       sleep(&cons.r, &cons.lock);
     }
-
+    // 当UART设备有中断，即有输入字符而且不是特殊输入(ctrl+p、...)的时候
+    // 会在consoleintr中断处理函数中唤醒阻塞在此处的进程
     c = cons.buf[cons.r++ % INPUT_BUF];
 
     if(c == C('D')){  // end-of-file
@@ -115,6 +118,9 @@ consoleread(struct file *f, int user_dst, uint64 dst, int n)
     }
 
     // copy the input byte to the user-space buffer.
+    // 被唤醒之后表示有字符输入，然后就拷贝到用户进程空间的地址
+    // 字符数小于希望读到的长度n的话，继续在下一次循环中阻塞
+    // 最后正常退出函数，从trap中返回到进程空间
     cbuf = c;
     if(either_copyout(user_dst, dst, &cbuf, 1) == -1)
       break;
@@ -145,51 +151,53 @@ consoleintr(int c)
   acquire(&cons.lock);
 
   switch(c){
-  case C('P'):  // Print process list.
-    procdump();
-    break;
-  case C('U'):  // Kill line.
-    while(cons.e != cons.w &&
-          cons.buf[(cons.e-1) % INPUT_BUF] != '\n'){
-      cons.e--;
-      consputc(BACKSPACE);
-    }
-    break;
-  case C('H'): // Backspace
-  case '\x7f':
-    if(cons.e != cons.w){
-      cons.e--;
-      consputc(BACKSPACE);
-    }
-    break;
-  default:
-    if(c != 0 && cons.e-cons.r < INPUT_BUF){
-      c = (c == '\r') ? '\n' : c;
-
-      // echo back to the user.
-      consputc(c);
-
-      // store for consumption by consoleread().
-      cons.buf[cons.e++ % INPUT_BUF] = c;
-
-      if(c == '\n' || c == C('D') || cons.e == cons.r+INPUT_BUF){
-        // wake up consoleread() if a whole line (or end-of-file)
-        // has arrived.
-        cons.w = cons.e;
-        wakeup(&cons.r);
+    // switch的前几个P、U、H都是特殊的输入字符，这些字符做一些别的处理
+    case C('P'):  // Print process list.
+      procdump();
+      break;
+    case C('U'):  // Kill line.
+      while (cons.e != cons.w && cons.buf[(cons.e - 1) % INPUT_BUF] != '\n') {
+        cons.e--;
+        consputc(BACKSPACE);
       }
-    }
-    break;
+      break;
+    case C('H'):  // Backspace
+    case '\x7f':
+      if (cons.e != cons.w) {
+        cons.e--;
+        consputc(BACKSPACE);
+      }
+      break;
+    default:
+      if (c != 0 && cons.e - cons.r < INPUT_BUF) {
+        c = (c == '\r') ? '\n' : c;
+
+        // echo back to the user.
+        consputc(c);
+
+        // store for consumption by consoleread().
+        cons.buf[cons.e++ % INPUT_BUF] = c;
+
+        if (c == '\n' || c == C('D') || cons.e == cons.r + INPUT_BUF) {
+          // wake up consoleread() if a whole line (or end-of-file)
+          // has arrived.
+          cons.w = cons.e;
+          // 最后唤醒因为consoleread而阻塞的进程
+          wakeup(&cons.r);
+        }
+      }
+      break;
   }
   
   release(&cons.lock);
 }
 
+//  main函数调用consoleinit，在这儿初始化的console设备的读写函数，console设备的主设备号为1
 void
 consoleinit(void)
 {
   initlock(&cons.lock, "cons");
-
+  // 初始化UART接口
   uartinit();
 
   // connect read and write system calls

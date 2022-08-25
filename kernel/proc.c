@@ -465,6 +465,7 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// 调度器，就是把当前的进程调度出去，然后调度到一个状态为可执行RUNNABLE的进程。
 void
 scheduler(void)
 {
@@ -485,6 +486,8 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        // swtch完成上下文切换，参数是两个线程的context
+        // 从当前调度器的context换到目标线程的context
         swtch(&c->scheduler, &p->context);
 
         // Process is done running for now.
@@ -525,6 +528,7 @@ sched(void)
     panic("sched interruptible");
 
   intena = mycpu()->intena;
+  // 首先从前一个线程切换到调度器，
   swtch(&p->context, &mycpu()->scheduler);
   mycpu()->intena = intena;
 }
@@ -580,10 +584,13 @@ sleep(void *chan, struct spinlock *lk)
   }
 
   // Go to sleep.
+  // 设置当前进程的chan为某个地址，这个应该没啥要求？只要能区分就行
+  // 后面的wakeup也是直接遍历全局进程数组找到chan指向同一地址的进程唤醒
   p->chan = chan;
   p->state = SLEEPING;
-
+  // 设置号chan之后sched调度
   sched();
+  // 等被唤醒的时候清除chan标记
 
   // Tidy up.
   p->chan = 0;
@@ -601,7 +608,9 @@ void
 wakeup(void *chan)
 {
   struct proc *p;
-
+  // 遍历全局的进程数组，找到指向同一地址进程，唤醒之
+  // 现在NPROC只有64，直接遍历可能还行
+  // 那在真实的linux kernel中很不现实，那是怎么实现的？什么数据结构？
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == SLEEPING && p->chan == chan) {
