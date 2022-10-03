@@ -38,6 +38,7 @@ procinit(void)
       char *pa = kalloc();
       if(pa == 0)
         panic("kalloc");
+      // 初始化进程的内核栈
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
@@ -454,6 +455,8 @@ scheduler(void)
 
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
+      // 自旋锁的机制是死等，直到可以获得锁，
+      // 也就是说调度器的调度策略就是顺序调度，按照proc数组中的顺序
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
@@ -461,6 +464,16 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        // c是当前线程，就是CPU的调度器线程，
+        // p是用户内核线程，即将运行的进程
+        // 在swtch.S中，把CPU的寄存器保存到a0顺延的地址
+        // 把a1地址开始的数据加载到当前CPU的寄存器中
+        // 完成内核线程的切换
+
+        // 简单的从锁的角度理解，因为涉及到多个CPU执行；
+        // 为了保证数据的一致性，在修改临界区的时候，就是需要加锁
+
+        // 关键在于调用swtch之后，导致了线程的切换，不会接着往下执行，而是切换了新的指令、
         swtch(&c->scheduler, &p->context);
 
         // Process is done running for now.
@@ -485,6 +498,7 @@ scheduler(void)
 // be proc->intena and proc->noff, but that would
 // break in the few places where a lock is held but
 // there's no process.
+// sched: 这个函数就是把CPU控制权让个调度器
 void
 sched(void)
 {
@@ -506,10 +520,17 @@ sched(void)
 }
 
 // Give up the CPU for one scheduling round.
+// 让出CPU，调用了sched调度CPU的调度器执行，选择新的进程运行
 void
 yield(void)
 {
   struct proc *p = myproc();
+  // 为什么要在sched， 也就是swtch前后加锁呢？
+  // 如果没有加锁，有可能在yield中设置p->state =
+  // RUNNABLE之后，swtch之前，别的调度器把这个进程调度到了。
+  // 那就会有两个CPU在执行同一个进程
+
+  // 在执行的时候，这儿的两个加锁释放不是顺序执行的。
   acquire(&p->lock);
   p->state = RUNNABLE;
   sched();
@@ -559,6 +580,8 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
 
+  // 在这儿调度出去，怎么确保过了ticks之后，能重新唤醒呢？
+  // 是时钟中断在调用一个chan上的wakeup吗
   sched();
 
   // Tidy up.
@@ -573,6 +596,7 @@ sleep(void *chan, struct spinlock *lk)
 
 // Wake up all processes sleeping on chan.
 // Must be called without any p->lock.
+// 这儿的chan就是个标记，给一个任一地址就行
 void
 wakeup(void *chan)
 {

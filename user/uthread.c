@@ -10,9 +10,29 @@
 #define STACK_SIZE  8192
 #define MAX_THREAD  4
 
+struct context {
+  /*some attr*/
+
+  uint64 ra;  /* 0 */
+  uint64 sp;  /* 8 */
+  uint64 s0;  /* 16 */
+  uint64 s1;  /* 24 */
+  uint64 s2;  /* 32 */
+  uint64 s3;  /* 40 */
+  uint64 s4;  /* 48 */
+  uint64 s5;  /* 56 */
+  uint64 s6;  /* 64 */
+  uint64 s7;  /* 72 */
+  uint64 s8;  /* 80 */
+  uint64 s9;  /* 88 */
+  uint64 s10; /* 96 */
+  uint64 s11; /* 104 */
+};
+
 struct thread {
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
+  struct context context;       /* context是线程的上下文 */
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
@@ -26,6 +46,7 @@ thread_init(void)
   // save thread 0's state.  thread_schedule() won't run the main thread ever
   // again, because its state is set to RUNNING, and thread_schedule() selects
   // a RUNNABLE thread.
+  // main这个线程只出现在这儿，因为状态设置为RUNNING，后面都不会被调度到。
   current_thread = &all_thread[0];
   current_thread->state = RUNNING;
 }
@@ -38,6 +59,7 @@ thread_schedule(void)
   /* Find another runnable thread. */
   next_thread = 0;
   t = current_thread + 1;
+  // for循环找到一个状态为RUNNABLE的线程，next_thread
   for(int i = 0; i < MAX_THREAD; i++){
     if(t >= all_thread + MAX_THREAD)
       t = all_thread;
@@ -55,12 +77,19 @@ thread_schedule(void)
 
   if (current_thread != next_thread) {         /* switch threads?  */
     next_thread->state = RUNNING;
+    // t是原来的线程，current_thread为将要调度到的线程
     t = current_thread;
     current_thread = next_thread;
+
     /* YOUR CODE HERE
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
+
+    // 现在切换线程，就是切换current_thread和t线程
+    // 直接调用thread_switch，切换线程上下文寄存器
+    thread_switch((uint64)&t->context, (uint64)&current_thread->context);
+
   } else
     next_thread = 0;
 }
@@ -70,18 +99,32 @@ thread_create(void (*func)())
 {
   struct thread *t;
 
+  // 从全局数组中找到一个空闲状态FREE的线程
   for (t = all_thread; t < all_thread + MAX_THREAD; t++) {
     if (t->state == FREE) break;
   }
+  // 先把线程的状态修改为RUNNABLE，即可运行状态
   t->state = RUNNABLE;
   // YOUR CODE HERE
+
+  // 设置好用户线程的上下文:
+  // 包括线程的返回地址，以及栈寄存器的地址
+  // 先初始化uthread->context结构体，线程切换上下文
+  memset(&(t->context), 0, sizeof(t->context));
+  // 设置riscv的ra寄存器的时候，同时设置了pc寄存器指向相同的地址
+  // 最后返回的时候，返回到ra寄存器的指向的下一条地址
+  t->context.ra = (uint64)func;
+  // 设置好用户线程的栈地址
+  t->context.sp = (uint64)t->stack + STACK_SIZE;
 }
 
 void 
 thread_yield(void)
 {
   current_thread->state = RUNNABLE;
+  // printf("[before thread_schedule] = %d\n", current_thread - all_thread);
   thread_schedule();
+  // printf("[after thread_schedule] = %d\n", current_thread - all_thread);
 }
 
 volatile int a_started, b_started, c_started;

@@ -164,6 +164,9 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
+  // 时钟中断，执行clockintr函数，调用wakeup唤醒chan上的sleep进程
+  // 在wakeup中不需要关心sleep进程的等待时间够不够，直接唤醒
+  // 也就是说不论进程sleep的时间，只要有时钟中断，进程都会被唤醒
   wakeup(&ticks);
   release(&tickslock);
 }
