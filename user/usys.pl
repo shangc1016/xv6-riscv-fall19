@@ -40,3 +40,6 @@ entry("ntas");
 entry("crash");
 entry("mount");
 entry("umount");
+
+entry("sigalarm");
+entry("sigreturn");

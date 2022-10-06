@@ -91,6 +91,7 @@ allocpid() {
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
 // If there are no free procs, return 0.
+// 在proc初始化的函数中，设置last_ticks、ticks、handler等参数
 static struct proc*
 allocproc(void)
 {
@@ -124,6 +125,13 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // lab syscall
+  p->clk_count = 0;
+  p->ticks = 0;
+  p->handler = 0;
+  p->reentrant = 0;
+  // lab syscall end
+  
   return p;
 }
 

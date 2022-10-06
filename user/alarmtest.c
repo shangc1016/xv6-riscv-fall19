@@ -26,6 +26,8 @@ main(int argc, char *argv[])
 
 volatile static int count;
 
+// 新添加的系统调用周期性的调用的函数
+// 对全局变量count自增
 void
 periodic()
 {
@@ -37,7 +39,7 @@ periodic()
 // tests whether the kernel calls
 // the alarm handler even a single time.
 void
-test0()
+test0() 
 {
   int i;
   printf("test0 start\n");
@@ -98,7 +100,11 @@ test1()
     // occurred; another is that that registers may not be
     // restored correctly, causing i or j or the address ofj
     // to get an incorrect value.
+    // 调用foo，最后i、j的值应该相同，但是这儿出现了不同。可能有两种不同的原因
+    // 1、handler的返回地址错了
+    // 2、寄存器现场恢复出错了
     printf("\ntest1 failed: foo() executed fewer times than it was called\n");
+    printf("i = %d, j = %d\n", i, j);
     exit(1);
   } else {
     printf("test1 passed\n");

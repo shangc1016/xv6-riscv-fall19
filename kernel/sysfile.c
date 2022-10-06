@@ -501,3 +501,43 @@ sys_crash(void)
   crash_op(ip->dev, crash);
   return 0;
 }
+
+
+// lab syscall start
+/*
+  1、首先，需要记录ticks以及handler函数指针，将其保存到proc结构体中
+  2、然后需要记录距离上一次调用handler的时间，在proc结构体中功能需要一个新的参数表示这个；
+  3、proc结构体在proc.c的allocproc中初始化
+  4、每个时钟周期，产生一个硬件中断。然后在usertrap中处理。在次添加代码；
+  5、在usertrap中通过判断which_dev如果是2，说明是一个时钟中断；
+  6、hiyou发生时钟中断的时候调用handler函数，注意hander函数的地址可能是0x0?这个有什么影响
+
+*/ 
+uint64
+sys_sigalarm(void){
+  // 首先保存syscall的参数
+  int ticks = 0;
+  uint64 handler = 0x0;
+
+  if(argint(0, &ticks) < 0 || argaddr(1, &handler) < 0) {
+    printf("error\n");
+    return -1;
+  }
+  struct proc *current = myproc();
+  current->ticks = ticks;
+  current->handler = handler;
+
+  return 0;
+}
+
+uint64
+sys_sigreturn(void) {
+  struct proc *current = myproc();
+  current->reentrant = 0;
+  current->clk_count = 0;
+  *(current->tf) = current->alarm_tf;
+
+  return 0;
+}
+
+// lab syscall end

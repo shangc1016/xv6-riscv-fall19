@@ -7,6 +7,7 @@
 #include "defs.h"
 
 struct spinlock tickslock;
+// 全局的ticks，表示从开时候的时钟中断次数
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
@@ -67,6 +68,22 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+    // lab syscall start
+    // 如果是时钟中断，并且当前进程消耗的时间达到ticks，
+    // 文档中说是当前进程的调用次数，
+    // 为什么要使用两套trapframe？因为sigalarm进入内核，sigreturn从内核中返回
+    // 这两个步骤的上下文环境不同
+    if((which_dev = devintr()) == 2){
+
+      struct proc *current = myproc();
+      current->clk_count ++;
+      if(current->clk_count % current->ticks == 0 && current->reentrant == 0){
+        current->alarm_tf = *(current->tf);
+        current->tf->epc = current->handler;
+        current->reentrant = 1;
+      }
+    }
+    // lab syscall end
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
