@@ -25,6 +25,11 @@ struct cpu {
   int noff;                   // Depth of push_off() nesting.
   int intena;                 // Were interrupts enabled before push_off()?
 };
+// noff: 记录的是当前cpu持有的spinlock的层数
+// intena: 字段保存的是在push_off之前的中断是否允许的状态
+// 在pop_off之后，判断cpu的noff，如果是0表示已经不再持有任和锁，
+// 然后再次判断cpu->intena,如果是1(表示在push_off之前中断是允许的)，
+// 那就intr_on，恢复最开始的中断状态。
 
 extern struct cpu cpus[NCPU];
 

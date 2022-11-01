@@ -14,6 +14,7 @@ volatile static int started = 0;
 void
 main()
 {
+  // main 函数在这儿初始化的时候，只让下面的初始化进行一次，也就是让cpuid=0的cpu执行
   if(cpuid() == 0){
     consoleinit();
     printfinit();
@@ -36,8 +37,10 @@ main()
     __sync_synchronize();
     started = 1;
   } else {
-    while(started == 0)
-      ;
+    // TODO1：其他的cpu需要先在这儿初始化空闲内存
+    // 也就是个kmem结构体，里面有一个链表，以及一把锁spinlock
+    kinit();
+    while (started == 0);
     __sync_synchronize();
     printf("hart %d starting\n", cpuid());
     kvminithart();    // turn on paging

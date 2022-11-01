@@ -23,16 +23,19 @@ void test0()
 {
   void *a, *a1;
   int n = 0;
-  printf("start test0\n");  
+  printf("start test0\n");
+  // ntas(0): 初始化spinlock的参数n以及nts;
   ntas(0);
-  for(int i = 0; i < NCHILD; i++){
+  for (int i = 0; i < NCHILD; i++) {
+    // fork子进程
     int pid = fork();
     if(pid < 0){
       printf("fork failed");
       exit(-1);
     }
     if(pid == 0){
-      for(i = 0; i < N; i++) {
+      for (i = 0; i < N; i++) {
+        // sbrk改变进程地址空间
         a = sbrk(4096);
         *(int *)(a+4) = 1;
         a1 = sbrk(-4096);
@@ -44,11 +47,13 @@ void test0()
       exit(-1);
     }
   }
-
+  //  等待子进程返回
   for(int i = 0; i < NCHILD; i++){
     wait(0);
   }
   printf("test0 results:\n");
+  // ntst(1): 打印lock的统计数据
+  // 返回的是bcache以及kmem这两个锁 自旋次数的总和
   n = ntas(1);
   if(n < 10) 
     printf("test0 OK\n");
