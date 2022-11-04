@@ -17,6 +17,8 @@ main()
   }
 
   blocks = 0;
+  // 每次写文件大小是sizeof(buf)，1024B，就是一个block的大小
+  // 直到写满文件
   while(1){
     *(int*)buf = blocks;
     int cc = write(fd, buf, sizeof(buf));
@@ -28,6 +30,8 @@ main()
   }
 
   printf("\nwrote %d blocks\n", blocks);
+  // 关键的判断在这儿，最开始xv6的文件只有256+12=268个block
+  // 要达到65803个block，需要更深的inode索引。
   if(blocks != 65803) {
     printf("bigfile: file is too small\n");
     exit(-1);

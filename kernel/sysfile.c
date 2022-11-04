@@ -295,22 +295,66 @@ sys_open(void)
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
 
+  // 日志事务
   begin_op(ROOTDEV);
 
-  if(omode & O_CREATE){
+  // 普通文件设置O_CREATE，不存在的话，可以创建
+  // 但是对于符号链接文件，不存在的话直接返回错误
+
+  // 默认打开符号链接文件的时候，不能使用O_CREATE
+  if (omode & O_CREATE) {
+    // 为啥有O_CREATE就直接调用了create？
+    // 目标path存在，create就不创建了
     ip = create(path, T_FILE, 0, 0);
-    if(ip == 0){
+    if (ip == 0) {
       end_op(ROOTDEV);
       return -1;
     }
   } else {
-    if((ip = namei(path)) == 0){
+    // namei根据path检索出inode，如果文件不存在直接返回
+    if ((ip = namei(path)) == 0) {
       end_op(ROOTDEV);
       return -1;
     }
     ilock(ip);
-    if(ip->type == T_DIR && omode != O_RDONLY){
+    if (ip->type == T_DIR && omode != O_RDONLY) {
       iunlockput(ip);
+      end_op(ROOTDEV);
+      return -1;
+    }
+  }
+
+  // 如果要打开的文件类型是symlink，同时没有设置O_NOFOLLOW，说明就是要递归打开普通文件
+  if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+    // step1: 先把target的path读进来
+    // step2: namei根据path得到inode
+    // step3: 判读symbol link是否是循环的，使用阈值判断
+    char target[MAXPATH];
+    int symlink_threshold = 10;
+    int i = 0;
+    for (; i < symlink_threshold; i++) {
+      if (readi(ip, 0, (uint64)target, 0, MAXPATH) < 0) {
+        iunlock(ip);
+        end_op(ROOTDEV);
+        return -1;
+      }
+      // printf("sys_open symlink, target = %s\n", target);
+      iunlock(ip);
+      // printf("recursion target = %s\n", target);
+      ip = namei(target);
+      if (ip == 0) {
+        // 如果没有符号链接文件，直接出错
+        end_op(ROOTDEV);
+        return -1;
+      }
+      // 递归查找符号链接的目的文件，直到找到非符号链接文件
+      ilock(ip);
+
+      if (ip->type != T_SYMLINK) break;
+      
+      memset(target, 0, MAXPATH);
+    }
+    if (i >= symlink_threshold) {
       end_op(ROOTDEV);
       return -1;
     }
@@ -483,3 +527,32 @@ sys_pipe(void)
   return 0;
 }
 
+uint64 sys_symlink() {
+
+  char target[MAXPATH];
+  char path[MAXPATH];
+
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  // step1: 创建symbol link file，`path`
+  struct inode *ip;
+
+  begin_op(ROOTDEV);
+
+  if ((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  // step2: 把path->target的映射关系写到symbol link文件
+  if (writei(ip, 0, (uint64)target, 0, MAXPATH) < 0) {
+    iunlockput(ip);
+    end_op(ROOTDEV);
+    return -1;
+  }
+  iunlockput(ip);
+  end_op(ROOTDEV);
+
+  return 0;
+}

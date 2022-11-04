@@ -154,6 +154,7 @@ concur(void)
       printf("FAILED: fork failed\n");
       exit(1);
     }
+    // 两个子进程
     if(pid == 0) {
       int m = 0;
       unsigned int x = (pid ? 1 : 97);

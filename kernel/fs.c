@@ -9,6 +9,7 @@
 // routines.  The (higher-level) system call implementations
 // are in sysfile.c.
 
+#include <stdlib.h>
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
@@ -375,12 +376,17 @@ iunlockput(struct inode *ip)
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
+// 
+// 映射: 文件逻辑块号bn -> 磁盘物理块号
 static uint
 bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
-  struct buf *bp;
+  struct buf *bp, *dbp;
 
+  // printf("bmap start bn = 0x%x\n" ,bn);
+
+  // 直接索引，数组中存的就是block地址
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
@@ -388,12 +394,18 @@ bmap(struct inode *ip, uint bn)
   }
   bn -= NDIRECT;
 
-  if(bn < NINDIRECT){
+  // 一级间接索引:数组中存的是下一级的addrs
+  if (bn < NINDIRECT) {
     // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
+    // 先加载一级间接索引,ip->addrs[NDIRECT]就是一级间接索引
+    // 没有一级索引的话，先创建一个
+    if ((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+    // 再次把下一级block读入到bp;
     bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
+    // bp->data是下一级的索引表
+    a = (uint *)bp->data;
+    // 在新的索引表中查找block number，得到最终的block地址
     if((addr = a[bn]) == 0){
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
@@ -402,6 +414,36 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  bn -= NINDIRECT;
+
+  // 二级间接索引
+  if (bn < NDINDIRECT) {
+    // 先加载二级间接索引, addrs[NDIRECT+1]就是13个直接索引的最后一个;
+    if ((addr = ip->addrs[NDIRECT + 1]) == 0) {
+      // 如果这个直接索引为空，先分配一个block
+      // printf("2 index empty\n");
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    }
+    // bp是二级索引块
+    bp = bread(ip->dev, addr);
+    a = (uint *)bp->data;
+    // 如果不存在，先创建一个
+    if ((addr = a[bn / NINDIRECT]) == 0) {
+      // printf("1 index empty\n");
+      a[bn / NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    // dbp是一级索引块
+    dbp = bread(ip->dev, addr);
+    a = (uint *)dbp->data;
+    if ((addr = a[bn % NINDIRECT]) == 0) {
+      a[bn % NINDIRECT] = addr = balloc(ip->dev);
+      log_write(dbp);
+    }
+    brelse(dbp);
+    return addr;
+  }
   panic("bmap: out of range");
 }
 
@@ -413,10 +455,10 @@ bmap(struct inode *ip, uint bn)
 static void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp;
-  uint *a;
-
+  int i, j, k;
+  struct buf *bp, *dbp;
+  uint *a, *b;
+  // 直接索引块
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
@@ -424,6 +466,7 @@ itrunc(struct inode *ip)
     }
   }
 
+  // 一级间接索引块
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -434,6 +477,36 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+
+  // 二级间接索引块
+  if (ip->addrs[NDIRECT + 1]) {
+    // 先把第一个二级索引块读到bp
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint *)bp->data;
+    for (j = 0; j < NINDIRECT; j++) {
+      // 二级索引存在，继续向下找一级索引
+      if (a[j]) {
+        // 读入一级索引块
+        dbp = bread(ip->dev, a[j]);
+        b = (uint *)dbp->data;
+        // 遍历一级索引块，逐个释放block
+        for (k = 0; k < NINDIRECT; k++) {
+          if (b[k])
+            bfree(ip->dev, b[k]);
+        }
+        // 读block之后要释放block
+        brelse(dbp);
+        // 最后删除一级索引块
+        bfree(ip->dev, a[j]);
+      }
+    }
+    // 释放二级索引块，和上面的bread对应
+    brelse(bp);
+    // 释放二级索引块的block
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;
