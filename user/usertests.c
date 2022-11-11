@@ -1722,6 +1722,7 @@ sbrkfail(char *s)
   for(i = 0; i < sizeof(pids)/sizeof(pids[0]); i++){
     if((pids[i] = fork()) == 0){
       // allocate a lot of memory
+      // sbrk(0)得到的是进程的sz，proc->sz
       sbrk(BIG - (uint64)sbrk(0));
       write(fds[1], "x", 1);
       // sit around until killed
@@ -1744,7 +1745,6 @@ sbrkfail(char *s)
     printf("%s: failed sbrk leaked memory\n", s);
     exit(1);
   }
-
   // test running fork with the above allocated page 
   pid = fork();
   if(pid < 0){

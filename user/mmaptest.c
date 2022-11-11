@@ -12,6 +12,7 @@ char buf[BSIZE];
 
 #define MAP_FAILED ((char *) -1)
 
+// 两个测试mmap_test、fork_test
 int
 main(int argc, char *argv[])
 {
@@ -151,12 +152,11 @@ mmap_test(void)
 
   // check that the mapping still works after close(fd).
   _v1(p);
-
   // write the mapped memory.
   for (i = 0; i < PGSIZE*2; i++)
     p[i] = 'Z';
-
   // unmap just the first two of three pages of mapped memory.
+  // 注意，p + PGSIZE*2 根本没有用到，也不会引起page fault，就不会分配器物理内存
   if (munmap(p, PGSIZE*2) == -1)
     err("munmap (3)");
 

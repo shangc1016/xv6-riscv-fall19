@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -68,7 +69,69 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } else if (r_scause() == 0xd || r_scause() == 0xf) {
+
+    // step1: 首先得到发生page fault的用户进程空间地址
+    uint64 va = r_stval();
+
+    // step2: 如果用户进程试图访问内核地址空间，直接kill进程 (对于usertests)
+    if (KERNBASE <= va && va <= KERNBASE + 2000000) {
+      p->killed = 1;
+      usertrapret();
+    }
+
+    // step3: 如果发生page fault的地址处于进程栈指针中间的保护页面[sp, sp + PGSIZE]
+    // 任何访问这块地址的情况都是错误的，直接杀死进程  (usertests)
+    if (p->tf->sp - PGSIZE <= va && va <= p->tf->sp) {
+      p->killed = 1;
+      usertrapret();
+    }
+
+    // step4: 遍历进程的vma，查看引起当前page fault的地址访问属于哪个mmap
+    int i;
+    for (i = 0; i < MMAPSZ; i++) {
+      if (p->vma[i].valid == 0) continue;
+      if (p->vma[i].addr <= va && va < p->vma[i].addr + p->vma[i].length) {
+        break;
+      }
+    }
+    // step6: 这儿的kill进程有，一个是判断pageault是不是因为mmap的lazy分配引起的，
+    // 如果不是的话，就说明是因为其他的原因，例如usertests中的sbrkfail测试点，
+    // 扩张用户进程导致物理内存耗尽，而且在sbrk之后不判断返回值，而是直接使用这块内存，
+    // 导致page fault。如果是这种情况，直接kill进程。
+    if (i >= MMAPSZ) {
+      p->killed = 1;
+      usertrapret();
+    }
+
+    // step7: 执行到这儿，说明page fault是因为mmap的lazy分配导致的
+    // 然后分配物理内存，准备mmap的lazy页面映射
+    char *mem;
+    if ((mem = kalloc()) == 0) {
+      usertrapret();
+    }
+    memset(mem, 0, PGSIZE);
+
+    // step8: 读vma[i].file文件的相应offset到kalloc分配的物理页面
+    // step8.1: 计算得到本次page fault应该映射的文件页相对于文件起始地址的偏移
+    // 因为在本lab中，mmap的文件偏移默认为0，所以直接vm - p->vma[i].addr就行
+    uint64 offset = PGROUNDDOWN(va) - p->vma[i].addr;
+    // step5.3: 使用readi读文件到mem页面，readfile定义在proc.c中
+    if (readfilepage(p->vma[i].file, offset, mem) < 0) {
+      usertrapret();
+    }
+
+    // step9: 根据mmap时候记录的prot设置页面映射的PTE访问属性
+    int perm = 0;
+    if (p->vma[i].prot & PROT_READ) perm |= PTE_R;
+    if (p->vma[i].prot & PROT_WRITE) perm |= PTE_W;
+
+    // 使用mappages映射页面，如果出错，就把kalloc的物理内存页面释放掉
+    if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, perm | PTE_U) != 0) {
+      kfree(mem);
+    }
+
+  } else if ((which_dev = devintr()) != 0) {
     // ok
   } else {
     printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);

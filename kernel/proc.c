@@ -8,6 +8,7 @@
 #include "file.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -122,6 +123,10 @@ found:
   memset(&p->context, 0, sizeof p->context);
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+
+  // lab mmap
+  for (int i = 0; i < MMAPSZ; i++)
+    p->vma[i].valid = 0;
 
   return p;
 }
@@ -263,6 +268,22 @@ fork(void)
   }
   np->sz = p->sz;
 
+  // copy lab mmap about data
+  for (int i = 0; i < MMAPSZ; i++) {
+    np->vma[i].valid = p->vma[i].valid;
+    if (np->vma[i].valid) {
+      np->vma[i].length  = p->vma[i].length;
+      np->vma[i].clength = p->vma[i].clength;
+      np->vma[i].prot    = p->vma[i].prot;
+      np->vma[i].flags   = p->vma[i].flags;
+      np->vma[i].offset  = p->vma[i].offset;
+      np->vma[i].addr    = p->vma[i].addr;
+      np->vma[i].caddr   = p->vma[i].caddr;
+      np->vma[i].file    = p->vma[i].file;
+      np->vma[i].file->ref++;
+    }
+  }
+  
   np->parent = p;
 
   // copy saved user registers.
@@ -322,6 +343,12 @@ exit(int status)
 {
   struct proc *p = myproc();
 
+  // 在exit中释放所有mmap的物理页面，然后恢复进程的sz
+  // 逐个遍历所有的vma，然后逐个取消关联页表
+  for (int i = 0; i < MMAPSZ; i++) {
+    munmap(p->vma[i].addr, p->vma[i].length);
+  }
+  
   if(p == initproc)
     panic("init exiting");
 
@@ -414,6 +441,7 @@ wait(uint64 addr)
             release(&p->lock);
             return -1;
           }
+          // freeproc父进程遍历所有的进程， 找到一个状态是ZOMBIE的子进程，然后freeproc释放之
           freeproc(np);
           release(&np->lock);
           release(&p->lock);
@@ -689,4 +717,131 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset) {
+  // step1: 检查参数的合法性
+  if (addr != 0 || offset != 0) return -1;
+  
+  // step2: 把本次的mmap参数添加到vma中
+  struct proc *p = myproc();
+
+  // step2.1:
+  // 如果以read、write并且map_shared的方式映射以rdonly方式打开的文件，直接返回
+  struct file *file  = p->ofile[fd];
+  if (prot & PROT_READ && prot & PROT_WRITE && flags & MAP_SHARED &&
+      file->writable == 0)
+    return -1;
+
+  // step3: 确定map映射的vm地址，就是proc->sz
+  uint64 oldsz = p->sz;
+  uint64 newsz = oldsz + length;
+
+  // step4: 更新当前进程的sz
+  p->sz = newsz;
+
+  // step5: 找到一个空闲的vma
+  int i;
+  for (i = 0; i < MMAPSZ; i++) {
+    if (p->vma[i].valid == 0) {
+      break;
+    }
+  }
+  if (i >= MMAPSZ) return -1;
+
+  // step5: mappages成功后，可以确定本次mmap的用户空间地址就是oldsz，记录之
+  p->vma[i].valid  = 1;
+  p->vma[i].length = length;
+  p->vma[i].clength = length;
+  p->vma[i].prot   = prot;
+  p->vma[i].flags  = flags;
+  p->vma[i].file   = file;
+  p->vma[i].offset = offset;
+  p->vma[i].addr = oldsz;
+  p->vma[i].caddr = oldsz;
+
+  p->ofile[fd]->ref++;
+
+  // print info
+  // printf("[  mmap range]: addr = %p\tlength = %p\n", oldsz, length);
+
+  return oldsz;
+}
+
+
+int munmap(uint64 addr, int length) {
+  struct proc *p = myproc();
+  // step1: 首先找到addr对应vma数组中哪一个mmap
+  int i;
+  for (i = 0; i < MMAPSZ; i++) {
+    if(p->vma[i].valid == 0) continue;
+    if (p->vma[i].addr <= addr && addr <= p->vma[i].addr + p->vma[i].length &&
+        p->vma[i].addr <= addr + length &&
+        addr + length <= p->vma[i].addr + p->vma[i].length) {
+      break;
+    }
+  }
+  if (i >= MMAPSZ) return -1;
+
+  // 检查munmap的区间，在map的开始，结尾或者全部?
+  if (addr == p->vma[i].addr &&
+      addr + length == p->vma[i].length + p->vma[i].addr) {
+    p->vma[i].valid = 0;
+    p->vma[i].addr = 0;
+    p->vma[i].length = 0;
+    // printf("valid reset\n");
+  } else if (addr == p->vma[i].addr) {
+    p->vma[i].addr = addr + length;
+    p->vma[i].length = p->vma[i].length - length;
+    // printf("munmap at head\n");
+  } else if (addr + length == p->vma[i].length + p->vma[i].addr) {
+    p->vma[i].length = addr - p->vma[i].addr;
+    // printf("munmap at tail\n");
+  }
+
+  // step2: 到这儿，p->vma[i]就是此次munmap的数据
+  uint64 start = PGROUNDDOWN(addr);
+  uint64 end = PGROUNDDOWN(addr + length);
+
+  int map_shared = p->vma[i].flags & MAP_SHARED;
+
+  // 判断flags参数，需不需要写回去
+  for (uint64 va = start; va < end; va += PGSIZE) {
+    uint64 pa = walkaddr(p->pagetable, va);
+    // 有可能mmap了好几个页面，但是一直没用，最后直接munmap了
+    if (pa) {
+      if (map_shared) {
+        writefilepage(p->vma[i].file, va - p->vma[i].caddr, (void *)pa);
+      }
+      // 把这个进程地址空间的页面取消映射
+      uvmunmap(p->pagetable, va, PGSIZE, 1);
+    }
+  }
+  // 如果一个mmap的所有range都被munmap了，那这个记录mmap的vma就不valid了，然后就需要把proc->sz缩小这个mmap增加的大小
+  // 然后因为一个mmap可能是由于多个munmap才能取消映射，所以在vma中多加一个字段clength，c就是const的意思，在每次munmap的时候不变
+  if (p->vma[i].valid == 0) p->sz -= p->vma[i].clength;
+  // printf("[munmap]: p->sz = %p,p->pid = %d\n", p->sz, p->pid);
+  return 0;
+}
+
+int writefilepage(struct file *file, int offset, void *buf) {
+  int ret = 0;
+  begin_op(file->ip->dev);
+  ilock(file->ip);
+  ret = writei(file->ip, 0, (uint64)buf, offset, PGSIZE);
+  iunlock(file->ip);
+  end_op(file->ip->dev);
+  return ret;
+
+}
+
+
+int readfilepage(struct file *file, int offset, void *buf) {
+  int ret = 0;
+  begin_op(file->ip->dev);
+  ilock(file->ip);
+  ret = readi(file->ip, 0, (uint64)buf, offset, PGSIZE);
+  iunlock(file->ip);
+  end_op(file->ip->dev);
+  return ret;
 }

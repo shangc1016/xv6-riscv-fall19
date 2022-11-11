@@ -327,8 +327,10 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+    // 因为mmap中需要lazy的方式分配物理页面，所以可能还没有映射页面，所以可能存在pte & PTE_V==0
+    if ((*pte & PTE_V) == 0)
+      continue;
+      // panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
