@@ -192,6 +192,7 @@ devintr()
     } else if(irq == VIRTIO0_IRQ || irq == VIRTIO1_IRQ ){
       virtio_disk_intr(irq - VIRTIO0_IRQ);
     } else if(irq == E1000_IRQ){
+      // 设备中断，e1000网卡有数据到来
       e1000_intr();
     } else {
       // the PLIC sends each device interrupt to every core,

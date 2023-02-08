@@ -97,6 +97,7 @@
 #define E1000_TXD_STAT_DD    0x00000001 /* Descriptor Done */
 
 // [E1000 3.3.3]
+// 发送数据包的描述符
 struct tx_desc
 {
   uint64 addr;
@@ -113,6 +114,7 @@ struct tx_desc
 #define E1000_RXD_STAT_EOP      0x02    /* End of Packet */
 
 // [E1000 3.2.3]
+// 接收数据包的descriptor
 struct rx_desc
 {
   uint64 addr;       /* Address of the descriptor's data buffer */

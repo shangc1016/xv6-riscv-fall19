@@ -79,6 +79,9 @@ fileclose(struct file *f)
     begin_op(ff.ip->dev);
     iput(ff.ip);
     end_op(ff.ip->dev);
+  } else if (ff.type == FD_SOCK) {
+    // 关闭套接字文件
+    sockclose(&ff);
   }
 }
 
@@ -122,6 +125,9 @@ fileread(struct file *f, uint64 addr, int n)
     if((r = readi(f->ip, 1, addr, f->off, n)) > 0)
       f->off += r;
     iunlock(f->ip);
+  } else if (f->type == FD_SOCK) {
+    // 读套接字文件
+    r = sockread(f, addr, n);
   } else {
     panic("fileread");
   }
@@ -173,6 +179,9 @@ filewrite(struct file *f, uint64 addr, int n)
       i += r;
     }
     ret = (i == n ? n : -1);
+  } else if (f->type == FD_SOCK) {
+    // 写套接字
+    ret = sockwrite(f, addr, n);
   } else {
     panic("filewrite");
   }

@@ -52,14 +52,15 @@ fdalloc(struct file *f)
   return -1;
 }
 
+// 套接字的connect函数
 uint64
 sys_connect(void)
 {
   struct file *f;
   int fd;
-  uint32 raddr;
-  uint32 rport;
-  uint32 lport;
+  uint32 raddr;   // remote address
+  uint32 rport;   // remote port
+  uint32 lport;   // local port
 
   if (argint(0, (int*)&raddr) < 0 ||
       argint(1, (int*)&lport) < 0 ||

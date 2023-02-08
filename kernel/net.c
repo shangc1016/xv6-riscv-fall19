@@ -309,6 +309,7 @@ net_rx_udp(struct mbuf *m, uint16 len, struct ip *iphdr)
   sip = ntohl(iphdr->ip_src);
   sport = ntohs(udphdr->sport);
   dport = ntohs(udphdr->dport);
+  // 接收UDP数据包，最终调用到sockrecvudp
   sockrecvudp(m, sip, dport, sport);
   return;
 
@@ -344,6 +345,7 @@ net_rx_ip(struct mbuf *m)
     goto fail;
 
   len = ntohs(iphdr->ip_len) - sizeof(*iphdr);
+  // IP协议仅支持UDP协议，调用net_rx_udp函数来处理udp数据
   net_rx_udp(m, len, iphdr);
   return;
 
@@ -364,11 +366,16 @@ void net_rx(struct mbuf *m)
     return;
   }
 
+  // printf("shost = %p\n", ethhdr->shost);
+  // ntohs: Network TO Host，把网络字节顺序转换为主机字节顺序
+  // 网络字节顺序是大端存储：字节高位在低地址
+  // 主机字节顺序(取决于不同系统)：字节低位在低地址
   type = ntohs(ethhdr->type);
+  // 根据不同的以太网数据包的类型，走不同的网络协议栈
   if (type == ETHTYPE_IP)
-    net_rx_ip(m);
+    net_rx_ip(m);           // IP协议
   else if (type == ETHTYPE_ARP)
-    net_rx_arp(m);
+    net_rx_arp(m);          // ARP(address resolution protocal)协议
   else
     mbuffree(m);
 }

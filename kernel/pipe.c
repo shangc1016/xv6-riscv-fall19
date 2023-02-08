@@ -18,6 +18,9 @@ struct pipe {
   int readopen;   // read fd is still open
   int writeopen;  // write fd is still open
 };
+// pipe管道是一种特殊的文件，但是和普通文件吧数据写到inode磁盘上不同
+// pipi管道这种文件把数据写到内存中，也就是上面的data[PIPESIZE]中，
+// 然后有不同的进程读写这块内存，这块内存相当于是一个队列，遵循FIFO
 
 int
 pipealloc(struct file **f0, struct file **f1)

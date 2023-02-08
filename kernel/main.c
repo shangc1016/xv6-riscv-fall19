@@ -21,7 +21,7 @@ main()
     printf("xv6 kernel is booting\n");
     printf("\n");
     kinit();         // physical page allocator
-    kvminit();       // create kernel page table
+    kvminit();       // create kernel page table // 在kvminit中初始化了qemu的pcie设备占用的内存区域
     kvminithart();   // turn on paging
     procinit();      // process table
     trapinit();      // trap vectors
@@ -32,7 +32,7 @@ main()
     iinit();         // inode cache
     fileinit();      // file table
     virtio_disk_init(minor(ROOTDEV)); // emulated hard disk
-    pci_init();
+    pci_init();      // 初始化pcie设备，主要关注e1000网卡
     sockinit();
     userinit();      // first user process
     __sync_synchronize();

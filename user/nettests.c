@@ -20,13 +20,14 @@ ping(uint16 sport, uint16 dport, int attempts)
 
   // you can send a UDP packet to any Internet address
   // by using a different dst.
-  
+  // connect函数建立socket连接，UDP连接
   if((fd = connect(dst, sport, dport)) < 0){
     fprintf(2, "ping: connect() failed\n");
     exit(1);
   }
 
-  for(int i = 0; i < attempts; i++) {
+  for (int i = 0; i < attempts; i++) {
+    // 把数据写入到套接字中
     if(write(fd, obuf, sizeof(obuf)) < 0){
       fprintf(2, "ping: send() failed\n");
       exit(1);
@@ -34,6 +35,7 @@ ping(uint16 sport, uint16 dport, int attempts)
   }
 
   char ibuf[128];
+  // 从套接字中读出数据
   int cc = read(fd, ibuf, sizeof(ibuf));
   if(cc < 0){
     fprintf(2, "ping: recv() failed\n");
@@ -41,6 +43,7 @@ ping(uint16 sport, uint16 dport, int attempts)
   }
 
   close(fd);
+  // strcmp比较写入的和读出的字符串是否相同
   if (strcmp(obuf, ibuf) || cc != sizeof(obuf)){
     fprintf(2, "ping didn't receive correct payload\n");
     exit(1);
@@ -224,6 +227,7 @@ int
 main(int argc, char *argv[])
 {
   int i, ret;
+  // makefile中定义的
   uint16 dport = NET_TESTS_PORT;
 
   printf("nettests running on port %d\n", dport);

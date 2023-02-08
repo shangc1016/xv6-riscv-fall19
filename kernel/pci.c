@@ -11,9 +11,11 @@
 #include "proc.h"
 #include "defs.h"
 
+// 注册pci设备，pci设备只有一个e1000
 void
 pci_init()
 {
+  // e1000就映射到这个地址
   // we'll place the e1000 registers at this address.
   // vm.c maps this range.
   uint64 e1000_regs = 0x40000000L;
@@ -30,7 +32,7 @@ pci_init()
     uint32 off = (bus << 16) | (dev << 11) | (func << 8) | (offset);
     volatile uint32 *base = ecam + off;
     uint32 id = base[0];
-    
+
     // 100e:8086 is an e1000
     if(id == 0x100e8086){
       // command and status register.
