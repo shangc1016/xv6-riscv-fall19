@@ -235,7 +235,12 @@ userinit(void)
   // 当p这个进程被调度到的时候，cpu会将epc恢复到pc，epc->pc，然后执行
   // 也就是pc最终会指向进程地址空间的0地址执行，也就是上面构造的initcode代码区
   p->tf->epc = 0;      // user program counter
-  // FIXME: 这儿设置p->tf->sp = PGSIZE是什么意思？
+  // 注意上面allocproc函数找到一个空闲的proc结构体之后，实际上这个进程的页表只分配了2个页面
+  // 分别是 1)内核栈空间p->kstack；2）trampframe在trampoline下面的一个页面中
+  // 在uvminit中实际只分配了一个物理页面，映射到了页表的0地址，这块内容用来存放initcode的代码
+  // 所以在这儿设置p->tf->sp=PGSIZE，实际上是让initcode的栈地址共用了代码段所在的物理页面
+  // 因为initcode甚至是可以手工计算的，代码段大小远小于一页，而且马上通过exec("/init\0")重新进入内核，不需要为栈分配额外的页面的
+  // 同样的，在上面的uvminit中，mappages的PTE权限是可读可写可执行的，印证了分析
   p->tf->sp = PGSIZE;  // user stack pointer
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
