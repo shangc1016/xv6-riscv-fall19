@@ -273,6 +273,7 @@ growproc(int n)
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
+// fork就是根据当前进程，完全拷贝一个一模一样的新进程np(new proc)
 int
 fork(void)
 {
@@ -286,6 +287,7 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
+  // 根据页表，逐项拷贝每个页面
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
@@ -299,6 +301,9 @@ fork(void)
   *(np->tf) = *(p->tf);
 
   // Cause fork to return 0 in the child.
+  // np->tf->a0就是当前进程在usermode的返回值，
+  // 回忆一下在usermode，if(ret = fork() == 0) { // new proc stuff... }
+  // 
   np->tf->a0 = 0;
 
   // increment reference counts on open file descriptors.
@@ -309,6 +314,9 @@ fork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  // np的pid是在allocproc中分配的，fork函数最后返回np->pid
+  // 最后写入p->tf->a0，这个p是当前进程
+  // if(ret = for() > 0) { // current proc stuff... }
   pid = np->pid;
 
   np->state = RUNNABLE;
@@ -375,6 +383,7 @@ exit(int status)
   // necessary or not. init may miss this wakeup, but that seems
   // harmless.
   acquire(&initproc->lock);
+  // 为什么要walkup initproc呢？，此时initproc已经是user/init.c了
   wakeup1(initproc);
   release(&initproc->lock);
 
@@ -395,11 +404,15 @@ exit(int status)
   acquire(&p->lock);
 
   // Give any children to init.
+  // 遍历所有进程，把p的所有子进程的父进程设置为initproc
   reparent(p);
 
   // Parent might be sleeping in wait().
+  // 把父进程唤醒，从这儿可以看到父进程可能有多个子进程，任何一个exit都会唤醒父进程
   wakeup1(original_parent);
 
+  // 可以看到子进程调用exit在这儿状态更新为ZOMBIE之后直接重新调度新的进程执行了
+  // 子进程的所有东西其实仍然存在，直到父进程调用wait回收已经exit的子进程资源
   p->xstate = status;
   p->state = ZOMBIE;
 
@@ -435,18 +448,22 @@ wait(uint64 addr)
         // because only the parent changes it, and we're the parent.
         acquire(&np->lock);
         havekids = 1;
+        // 找到在当前进程的所有僵尸子进程，然后释放资源；
         if(np->state == ZOMBIE){
           // Found one.
           pid = np->pid;
+          // 从子进程的地址空间中把xstate拷贝出来，这儿wait的参数addr只是一个标志，要不要copyout
           if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
                                   sizeof(np->xstate)) < 0) {
             release(&np->lock);
             release(&p->lock);
             return -1;
           }
+          // 把全局数组proc的这一项释放
           freeproc(np);
           release(&np->lock);
           release(&p->lock);
+          // 最后返回值是子进程pid，父进程可以根据这个判断是哪个子进程返回了；
           return pid;
         }
         release(&np->lock);
@@ -551,6 +568,7 @@ sched(void)
   if(intr_get())
     panic("sched interruptible");
 
+  // intena是保存的上下文，含义是中断使能
   intena = mycpu()->intena;
   swtch(&p->context, &mycpu()->scheduler);
   mycpu()->intena = intena;
@@ -592,6 +610,7 @@ forkret(void)
 
 // Atomically release lock and sleep on chan.
 // Reacquires lock when awakened.
+// 对应sys_sleep函数
 void
 sleep(void *chan, struct spinlock *lk)
 {
@@ -609,6 +628,8 @@ sleep(void *chan, struct spinlock *lk)
   }
 
   // Go to sleep.
+  // 设置好当前进程的状态为SLEEPING，然后sched重新调度swtch到新的进程执行
+  // 那这个进程怎么回来呢？在这儿lk是tickslock，我们去定时器中断处理函数查看
   p->chan = chan;
   p->state = SLEEPING;
 
@@ -626,6 +647,7 @@ sleep(void *chan, struct spinlock *lk)
 
 // Wake up all processes sleeping on chan.
 // Must be called without any p->lock.
+// wakeup把sleep在chan上的进程全部唤醒
 void
 wakeup(void *chan)
 {
@@ -663,6 +685,8 @@ kill(int pid)
   for(p = proc; p < &proc[NPROC]; p++){
     acquire(&p->lock);
     if(p->pid == pid){
+      // 可以看到，kill其实就是把p->killed设置了，
+      // 对应的处理函数在usertrap中，syscall -> 判断p->killed，如果被killed的话，调用exit(-1)
       p->killed = 1;
       if(p->state == SLEEPING){
         // Wake process from sleep().
