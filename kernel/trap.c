@@ -182,6 +182,7 @@ kerneltrap()
   if(intr_get() != 0)
     panic("kerneltrap: interrupts enabled");
 
+  // 检查是哪一个设备中断，然后处理，得到which_dev
   if((which_dev = devintr()) == 0){
     printf("scause %p (%s)\n", scause, scause_desc(scause));
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -189,6 +190,7 @@ kerneltrap()
   }
 
   // give up the CPU if this is a timer interrupt.
+  // 根据devintr，which_dev==2的情况只有一种，就是定时器中断
   if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
     yield();
 
@@ -198,9 +200,16 @@ kerneltrap()
   w_sstatus(sstatus);
 }
 
+// 定时器中断的handler
 void
 clockintr()
 {
+  // ticks自增，然后wakeup唤醒sleep在ticks这个chan的进程
+  // 再看一下这个chan是啥意思，在sys_sleep中，其实这个chan就是ticks的地址
+  // 这儿wakeup也是ticks的地址，wakeup把sleep在这个chan上的进程全部唤醒
+  // 这是啥意思呢？既然这样怎么区分sleep(5)，sleep(10)呢？
+  // sleep，wakeup的chan都是同一个地址，那岂不是每次定时器中断都会把所有sleep的唤醒
+  // 这是一种简单的做法，再回去看sys_sleep
   acquire(&tickslock);
   ticks++;
   wakeup(&ticks);
@@ -242,6 +251,7 @@ devintr()
     // forwarded by timervec in kernelvec.S.
 
     if(cpuid() == 0){
+      // 定时器中断
       clockintr();
     }
     

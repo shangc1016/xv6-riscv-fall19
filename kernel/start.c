@@ -52,6 +52,11 @@ start()
   // 允许supervisor模式下的所有异常。外部、定时器、软件、中断
   w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);
 
+  // configure Physical Memory Protection to give supervisor mode
+  // access to all of physical memory.
+  w_pmpaddr0(0x3fffffffffffffull);
+  w_pmpcfg0(0xf);
+
   // ask for clock interrupts.
   // 定时器初始化
   timerinit();

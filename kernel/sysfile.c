@@ -18,6 +18,7 @@
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
+// 根据syscall的参数，得到进程打开文件struct file，其实就是多了myproc()->ofile[xxx]这一步
 static int
 argfd(int n, int *pfd, struct file **pf)
 {
@@ -58,8 +59,10 @@ sys_dup(void)
   struct file *f;
   int fd;
 
+  // 首先找到这个打开文件f
   if(argfd(0, 0, &f) < 0)
     return -1;
+  // 然后根据这个发，再次打开一遍，计数ref++
   if((fd=fdalloc(f)) < 0)
     return -1;
   filedup(f);
@@ -91,6 +94,7 @@ sys_write(void)
   return filewrite(f, p, n);
 }
 
+// 关闭系统打开文件
 uint64
 sys_close(void)
 {
@@ -99,7 +103,9 @@ sys_close(void)
 
   if(argfd(0, &fd, &f) < 0)
     return -1;
+  // 把struct的打开文件数组的这一项清0
   myproc()->ofile[fd] = 0;
+  // 然后关闭这个文件，这个有引用计数
   fileclose(f);
   return 0;
 }
@@ -391,6 +397,7 @@ sys_mknod(void)
   return 0;
 }
 
+// 这个应该是change directory，改变进程当前目录
 uint64
 sys_chdir(void)
 {
@@ -399,19 +406,23 @@ sys_chdir(void)
   struct proc *p = myproc();
   
   begin_op(ROOTDEV);
+  // 首先解析chdir的参数path，然后根据path在文件系统找到inode
   if(argstr(0, path, MAXPATH) < 0 || (ip = namei(path)) == 0){
     end_op(ROOTDEV);
     return -1;
   }
   ilock(ip);
+  // 检查ip->type是不是目录
   if(ip->type != T_DIR){
     iunlockput(ip);
     end_op(ROOTDEV);
     return -1;
   }
   iunlock(ip);
+  // 把进程当前的目录释放，这儿会有引用计数
   iput(p->cwd);
   end_op(ROOTDEV);
+  // 重新设置p->cwd
   p->cwd = ip;
   return 0;
 }

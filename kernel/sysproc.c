@@ -61,12 +61,17 @@ sys_sleep(void)
   if(argint(0, &n) < 0)
     return -1;
   acquire(&tickslock);
+  // ticks0先把当前ticks记住
   ticks0 = ticks;
+  // 分析完sleep和walkup，知道每次定时器中断都会唤醒进程
+  // 进程被唤醒之后被调度到的时候，会到这儿，在while中判断当前ticks和ticks0
+  // 继续sleep。所以usermode中sleep时长其实是在这个循环实现的
   while(ticks - ticks0 < n){
     if(myproc()->killed){
       release(&tickslock);
       return -1;
     }
+    // sleep在固定的chan，也就是&ticks
     sleep(&ticks, &tickslock);
   }
   release(&tickslock);

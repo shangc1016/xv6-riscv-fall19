@@ -103,6 +103,7 @@ holding(struct spinlock *lk)
 void
 push_off(void)
 {
+  // intr_get 检查中断使能状态
   int old = intr_get();
   if(old)
     intr_off();
