@@ -758,3 +758,53 @@ procdump(void)
     printf("\n");
   }
 }
+
+
+
+void pstatus2str(enum procstate status, char *str) {
+  switch (status) {
+    case UNUSED: {
+      memmove(str, "UNUSED__", 10);
+      break;
+    }
+    case SLEEPING: {
+      memmove(str, "SLEEPING", 10);
+      break;
+    }
+    case RUNNABLE: {
+      memmove(str, "RUNNABLE", 10);
+      break;
+    }
+    case RUNNING: {
+      memmove(str, "RUNNING_", 10);
+      break;
+    }
+    case ZOMBIE: {
+      memmove(str, "ZOMBIE__", 10);
+      break;
+    }
+  }
+}
+
+
+void print_procinfo(struct proc *p) {
+  char pstatus[10];
+  int ppid = 0;
+  if(p->parent) ppid = p->parent->pid;
+
+  pstatus2str(p->state, pstatus);
+  printf("pid: %d  ", p->pid);
+  printf("ppid: %d  ", ppid);
+  printf("state: %s  ", pstatus);
+  printf("name: %s\n", p->name);
+}
+
+void ps(void) {
+  int i;
+
+  for(i = 0; i < NPROC; i++){
+    if(proc[i].state != UNUSED) {
+      print_procinfo(&proc[i]);
+    }
+  }
+}

@@ -1,3 +1,5 @@
+#include "kernel/types.h"
+
 struct stat;
 struct rtcdate;
 
@@ -27,6 +29,8 @@ int ntas();
 int crash(const char*, int);
 int mount(char*, char *);
 int umount(char*);
+// new add
+int ps(void);
 
 // ulib.c
 int stat(const char*, struct stat*);

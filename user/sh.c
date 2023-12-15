@@ -169,10 +169,15 @@ main(void)
         fprintf(2, "cannot cd %s\n", buf+3);
       continue;
     }
+    int back = 0;
+    if(buf[strlen(buf)-2] =='&') {
+      back = 1;
+      buf[strlen(buf)-2] = '\0';
+    }
     // 然后fork出子进程执行命令，到这儿整个系统就启动完成了
     if(fork1() == 0)
       runcmd(parsecmd(buf));
-    wait(0);
+    if(!back) wait(0);
   }
   exit(0);
 }
